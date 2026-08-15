@@ -54,6 +54,13 @@
   text-align: left;
 }
 
+.collapseHint {
+  flex: none;
+  font-size: 12px;
+  opacity: 0.5;
+  align-self: center;
+}
+
 .settingsBtn {
   flex: none;
   padding: 2px 6px;

@@ -246,6 +246,7 @@ export function StockPnlCard({ onSaveCookie, onSaveFundKey }: StockPnlInjected):
         onPointerUp={endDrag}
         onPointerCancel={endDrag}
         aria-label="展开今日盈亏"
+        title="点击展开"
       >
         <span className={css.pillLabel}>今日盈亏</span>
         <span className={css.pillValue}>{offline ? '--' : formatPnl(pnl, yk, showAmount)}</span>
@@ -268,7 +269,9 @@ export function StockPnlCard({ onSaveCookie, onSaveFundKey }: StockPnlInjected):
           onPointerUp={endDrag}
           onPointerCancel={endDrag}
           aria-label="收起今日盈亏"
+          title="点击收起"
         >
+          <span className={css.collapseHint}>▾</span>
           <span>今日盈亏</span>
           <span className={clsx(css.value, colorClass(pnlSign) === 'up' && css.up, colorClass(pnlSign) === 'down' && css.down)}>{offline ? '--' : formatPnl(pnl, yk, showAmount)}</span>
         </button>
