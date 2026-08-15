@@ -15,11 +15,7 @@
 
 ## 截图
 
-<!-- 在这里添加你的截图，例如
-| 折叠药丸 | 展开卡片 |
-|---|---|
-| ![pill](screenshots/pill.png) | ![card](screenshots/card.png) |
--->
+![dsh-ths-holdings 卡片](assets/screenshot.png)
 
 ## 安装
 

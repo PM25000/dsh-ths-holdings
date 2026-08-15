@@ -15,11 +15,7 @@ Unlike watchlist tools, this plugin reads your **actual positions** and shows yo
 
 ## Screenshots
 
-<!-- Add your screenshots here, e.g.
-| Collapsed pill | Expanded card |
-|---|---|
-| ![pill](screenshots/pill.png) | ![card](screenshots/card.png) |
--->
+![dsh-ths-holdings card](assets/screenshot.png)
 
 ## Installation
 
