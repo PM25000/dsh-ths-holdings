@@ -60,6 +60,8 @@ dsh plugin --profile web add dsh-ths-holdings
 会话 Cookie 会过期——过期时卡片显示 **Token 已过期** 横幅，重复步骤 1–5 贴新的即可（`v` 反爬令牌自动处理，无需关心）。
 
 > 💡 完成一笔新交易后，请在投资账本 **APP** 上重新上传数据到网页版，避免两端持仓不一致。
+>
+> ![上传数据教程](assets/update.png)
 
 ## 特性
 

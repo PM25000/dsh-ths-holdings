@@ -60,6 +60,8 @@ then `cd $DSH_HOME/profiles/web && pnpm install` and restart `dsh web`. The plug
 The session cookie expires eventually — when it does, the card shows a **Token 已过期** banner; repeat steps 1–5 with a fresh cookie (the `v` anti-bot token is handled automatically).
 
 > 💡 After completing a new trade, re-upload your data from the investment-ledger **app** to the web version so your holdings stay consistent between the two.
+>
+> ![Data upload tutorial](assets/update.png)
 
 ## Features
 
