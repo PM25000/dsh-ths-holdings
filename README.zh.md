@@ -18,8 +18,8 @@ dsh plugin --profile web add dsh-ths-holdings
 
 ```yaml
 plugins:
-  - id: stock-pnl
-    name: dsh-stock-pnl
+  - id: ths-holdings
+    name: dsh-ths-holdings
 ```
 
 然后重启 `dsh web`。

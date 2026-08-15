@@ -18,8 +18,8 @@ Or install from npm and add to your `cordis.yml` manually:
 
 ```yaml
 plugins:
-  - id: stock-pnl
-    name: dsh-stock-pnl
+  - id: ths-holdings
+    name: dsh-ths-holdings
 ```
 
 Then restart `dsh web`.

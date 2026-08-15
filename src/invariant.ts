@@ -1,16 +1,16 @@
 /**
- * Package-owned invariant companion for `@deepseek-ai/dsh-client-ui-stock-pnl`.
- * @module @deepseek-ai/dsh-client-ui-stock-pnl/invariant
+ * Package-owned invariant companion for `dsh-ths-holdings`.
+ * @module dsh-ths-holdings/invariant
  */
 
 /* jscpd:ignore-start */
 import type { Context } from '@deepseek-ai/cordis'
 import type { InvariantInstaller } from '@deepseek-ai/dsh-invariants'
 
-const PACKAGE_NAME = '@deepseek-ai/dsh-client-ui-stock-pnl'
+const PACKAGE_NAME = 'dsh-ths-holdings'
 
 /** Cordis companion plugin name. */
-export const name = 'ui-stock-pnl-invariant'
+export const name = 'dsh-ths-holdings-invariant'
 /** Service required before the companion can reserve package ownership. */
 export const inject = ['invariants']
 
