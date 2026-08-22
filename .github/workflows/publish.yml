@@ -139,7 +139,14 @@ jobs:
       - name: Publish tarball
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: npm publish ./dist/*.tgz --provenance --access public
+        # --provenance (sigstore OIDC) requires npmjs trusted-publishing to be
+        # configured for this repo on the npm account; without it the publish
+        # fails even though the token is valid. Publish without provenance so
+        # the first release goes out; re-add --provenance once the npm account
+        # links this repository for trusted publishing.
+        run: |
+          npm whoami
+          npm publish ./dist/*.tgz --access public
 
   release:
     name: GitHub Release with tarball
