@@ -24,6 +24,21 @@ interface Snapshot {
   poll_ms: number
 }
 
+/** The `/api/stock-pnl/acquire*` payload subset the card renders. */
+interface AcquireStatus {
+  state: 'idle' | 'acquiring' | 'saved' | 'failed'
+  error?: string
+  hint?: string
+}
+
+/** The `/api/stock-pnl/verify` payload subset the card renders. */
+interface VerifyView {
+  configured: boolean
+  valid: boolean
+  error?: string
+  hint?: string
+}
+
 /** Business face injected at registration: the two credential-writing verbs. */
 export interface StockPnlInjected {
   /** Persist the Cookie value through the host credential seam. */
@@ -115,6 +130,11 @@ export function StockPnlCard({ onSaveCookie, onSaveFundKey }: StockPnlInjected):
   const [portfolios, setPortfolios] = useState<readonly PortfolioInfo[]>([])
   const [portfolioFundKey, setPortfolioFundKey] = useState(() => localStorage.getItem('stock-pnl-fund-key') ?? '')
   const [portfolioRefreshKey, setPortfolioRefreshKey] = useState(0)
+  // Auto-acquire lifecycle: idle/acquiring/saved/failed plus a request guard.
+  const [acq, setAcq] = useState<AcquireStatus | null>(null)
+  const [acqBusy, setAcqBusy] = useState(false)
+  // Verify badge: whether the stored Cookie is accepted by the ledger.
+  const [verify, setVerify] = useState<VerifyView | null>(null)
   // Show the yuan amount (yk) instead of percentage when toggled.
   const [showAmount, setShowAmount] = useState(() => localStorage.getItem('stock-pnl-show-amount') === 'true')
   // Vertical position of the card's top edge, in viewport pixels; `null` keeps
@@ -182,6 +202,7 @@ export function StockPnlCard({ onSaveCookie, onSaveFundKey }: StockPnlInjected):
   // Fetch the portfolio list when the settings panel opens or refresh is clicked.
   useEffect(() => {
     if (!editing) return
+    void runVerify()
     let disposed = false
     void (async () => {
       try {
@@ -202,6 +223,89 @@ export function StockPnlCard({ onSaveCookie, onSaveFundKey }: StockPnlInjected):
     return () => { disposed = true }
   }, [editing, portfolioRefreshKey])
 
+  /** Ask the host whether the stored Cookie is accepted by the ledger. */
+  const runVerify = async (): Promise<void> => {
+    try {
+      const resp = await fetch('/api/stock-pnl/verify')
+      if (!resp.ok) return
+      const view = (await resp.json()) as VerifyView
+      setVerify(view)
+    } catch { /* badge stays unknown */ }
+  }
+
+  /** Fold one acquire-status answer into the card; a saved run completes the flow. */
+  const applyAcquireStatus = (st: AcquireStatus): void => {
+    setAcq({ state: st.state, error: st.error, hint: st.hint })
+    if (st.state !== 'saved') return
+    // The Cookie changed — clear the stored fund_key so the next portfolio
+    // load auto-selects the first account of the fresh session.
+    setSaved(true)
+    setDraft('')
+    localStorage.removeItem('stock-pnl-fund-key')
+    setPortfolioFundKey('')
+    setPortfolioRefreshKey(k => k + 1)
+    setRefreshKey(k => k + 1)
+    void runVerify()
+  }
+
+  /** Start the auto-acquire flow: the host opens a visible Edge window. */
+  const startAcquire = async (): Promise<void> => {
+    if (acqBusy) return
+    setAcqBusy(true)
+    setSaved(false)
+    setSaveError(null)
+    try {
+      const resp = await fetch('/api/stock-pnl/acquire')
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+      applyAcquireStatus((await resp.json()) as AcquireStatus)
+    } catch (error) {
+      setAcq({ state: 'failed', error: error instanceof Error ? error.message : String(error) })
+    } finally {
+      setAcqBusy(false)
+    }
+  }
+
+  /** The "我已登录" button: run one immediate sign-in probe. */
+  const continueAcquire = async (): Promise<void> => {
+    try {
+      const resp = await fetch('/api/stock-pnl/acquire/check')
+      if (!resp.ok) return
+      applyAcquireStatus((await resp.json()) as AcquireStatus)
+    } catch { /* the poll loop surfaces the failure */ }
+  }
+
+  /** Abandon the auto-acquire flow and close the window. */
+  const cancelAcquire = async (): Promise<void> => {
+    try {
+      const resp = await fetch('/api/stock-pnl/acquire/cancel')
+      if (!resp.ok) return
+      setAcq((await resp.json()) as AcquireStatus)
+    } catch {
+      setAcq({ state: 'idle' })
+    }
+  }
+
+  // While a sign-in is in progress, poll the host status every second; the
+  // host closes the window itself once the Cookie is committed.
+  const acquiring = acq?.state === 'acquiring'
+  useEffect(() => {
+    if (!acquiring) return
+    let disposed = false
+    const timer = window.setInterval(() => {
+      void (async () => {
+        try {
+          const resp = await fetch('/api/stock-pnl/acquire/status')
+          if (disposed || !resp.ok) return
+          applyAcquireStatus((await resp.json()) as AcquireStatus)
+        } catch { /* transient; next tick */ }
+      })()
+    }, 1000)
+    return () => {
+      disposed = true
+      window.clearInterval(timer)
+    }
+  }, [acquiring])
+
   const pnl = snapshot?.pnl_pct ?? 0
   const yk = snapshot?.pnl_yk ?? 0
   const sh = snapshot?.sh_pct ?? 0
@@ -214,15 +318,16 @@ export function StockPnlCard({ onSaveCookie, onSaveFundKey }: StockPnlInjected):
     try {
       const cookieValue = draft.replace(/\s+/g, '')
       if (cookieValue.length > 0) await onSaveCookie(cookieValue)
-      // Cookie changed — clear stored fund_key so the next settings open
-      // auto-selects the first portfolio from the fresh account list.
+      // Cookie changed — clear stored fund_key so the next portfolio load
+      // auto-selects the first account of the fresh session.
       localStorage.removeItem('stock-pnl-fund-key')
       setPortfolioFundKey('')
       setPortfolioRefreshKey(k => k + 1)
       setSaved(true)
-      setEditing(false)
       setDraft('')
       setRefreshKey(key => key + 1)
+      // Validate immediately so the panel shows "✓ 有效" / "✗ 无效" right away.
+      await runVerify()
     } catch (error) {
       setSaveError(error instanceof Error ? error.message : String(error))
     } finally {
@@ -287,6 +392,50 @@ export function StockPnlCard({ onSaveCookie, onSaveFundKey }: StockPnlInjected):
 
       {editing && (
         <div className={css.settings}>
+          <div className={css.settingsHeader}>
+            <label className={css.settingsLabel} htmlFor="stock-pnl-cookie">STOCK_PNL_COOKIE</label>
+            {verify !== null && (
+              <span
+                className={clsx(css.badge, !verify.configured ? css.badgeMuted : verify.valid ? css.badgeOk : css.badgeBad)}
+                role="status"
+                title={verify.error ?? (verify.configured ? 'Cookie 已通过账本校验' : '尚未配置 Cookie')}
+              >
+                {!verify.configured ? '未配置' : verify.valid ? '✓ 有效' : '✗ 无效'}
+              </span>
+            )}
+          </div>
+
+          {(acq === null || acq.state === 'idle') ? (
+            <div className={css.acqRow}>
+              <button type="button" className={css.autoBtn} onClick={() => { void startAcquire() }} disabled={acqBusy}>
+                {acqBusy ? '启动浏览器…' : '🖥 自动获取 Cookie（推荐）'}
+              </button>
+              <span className={css.acqTip}>弹出浏览器窗口，扫码登录后自动保存</span>
+            </div>
+          ) : acq.state === 'acquiring' ? (
+            <div className={css.acqPanel}>
+              <div className={css.acqStatus}>正在登录… 请在弹出的浏览器窗口完成登录（扫码 / 账号）</div>
+              {acq.error !== undefined && acq.error.length > 0 && <div className={css.error}>{acq.error}</div>}
+              {acq.hint !== undefined && acq.hint.length > 0 && <div className={css.acqTip}>{acq.hint}</div>}
+              <div className={css.acqActions}>
+                <button type="button" className={css.ghostBtn} onClick={() => { void continueAcquire() }}>我已登录，继续 →</button>
+                <button type="button" className={css.cancelBtn} onClick={() => { void cancelAcquire() }}>取消</button>
+              </div>
+            </div>
+          ) : acq.state === 'saved' ? (
+            <div className={css.acqStatus}>✓ 已自动获取并保存 Cookie</div>
+          ) : (
+            <div className={css.acqPanel}>
+              <div className={css.error}>{acq.error ?? '自动获取失败'}</div>
+              {acq.hint !== undefined && acq.hint.length > 0 && <div className={css.acqTip}>{acq.hint}</div>}
+              <button type="button" className={css.autoBtn} onClick={() => { void startAcquire() }} disabled={acqBusy}>重试</button>
+            </div>
+          )}
+
+          <div className={css.manualHint}>
+            或手动：打开 <a className={css.link} href="https://tzzb.10jqka.com.cn" target="_blank" rel="noreferrer">投资账本</a> 登录后，按
+            F12 → 控制台输入 <code className={css.code}>copy(document.cookie)</code>，把结果粘贴到下方：
+          </div>
           <label className={css.settingsLabel} htmlFor="stock-pnl-cookie">STOCK_PNL_COOKIE</label>
           <textarea
             id="stock-pnl-cookie"
@@ -344,6 +493,9 @@ export function StockPnlCard({ onSaveCookie, onSaveFundKey }: StockPnlInjected):
           {saving && <div className={css.settingsStatus}>保存中...</div>}
           {saveError !== null && <div className={css.error}>{saveError}</div>}
           {saved && <div className={css.settingsStatus}>已保存</div>}
+          {verify !== null && !verify.valid && verify.error !== undefined && (
+            <div className={css.error}>{verify.error}</div>
+          )}
         </div>
       )}
 

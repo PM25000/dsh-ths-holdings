@@ -21,7 +21,8 @@ import type { CredentialInfo, CredentialRef, ResolvedCredential } from '@deepsee
 import z from '@deepseek-ai/schemastery'
 import WebServer from '@deepseek-ai/dsh-host-webserver'
 import * as uiStockPnl from '../src/index.ts'
-import { collectStats, type FetchLike } from '../src/fetch.ts'
+import { CookieAcquirer, cookiesToHeader, isSignedIn, type PwCookie, type PwModule } from '../src/acquire.ts'
+import { collectStats, verifyCookie, type FetchLike } from '../src/fetch.ts'
 
 const FIXED_NOW = () => new Date('2026-05-26T06:00:00Z')
 const COOKIE_ENV = 'STOCK_PNL_COOKIE'
@@ -194,6 +195,185 @@ async function loadComposition(): Promise<number> {
   const server = context.webServer as InstanceType<typeof WebServer>
   return server.port
 }
+
+/** A cookie for a fake browser session. */
+function fakeCookie(name: string, value: string, domain = '.10jqka.com.cn'): PwCookie {
+  return { name, value, domain, path: '/' }
+}
+
+/** A fake playwright module: never opens a window, exposes the state the acquire state machine reads. */
+function fakePlaywright(cookies: PwCookie[]): { module: PwModule; browser: any; setCookies(next: PwCookie[]): void; setClosed(v: boolean): void } {
+  const browser = {
+    closed: false,
+    isConnected: () => !browser.closed,
+    async close() { browser.closed = true },
+    async newContext(opts?: { locale?: string; viewport?: { width: number; height: number } }) {
+      expect(opts?.locale).toBe('zh-CN')
+      return {
+        async cookies() { return cookies },
+        async addInitScript() {},
+        async newPage() {
+          return {
+            async goto() {},
+            async content() { return '' },
+            async waitForLoadState() {},
+            isClosed: () => false,
+          }
+        },
+      }
+    },
+  }
+  const module: PwModule = {
+    chromium: {
+      async launch(opts?: { channel?: string; headless?: boolean; args?: string[] }) {
+        expect(opts?.channel).toBe('msedge')
+        expect(opts?.headless).toBe(false)
+        expect(opts?.args).toContain('--disable-blink-features=AutomationControlled')
+        return browser
+      },
+    },
+  }
+  return {
+    module,
+    browser,
+    setCookies(next) { cookies.splice(0, cookies.length, ...next) },
+    setClosed(v) { browser.closed = v },
+  }
+}
+
+describe('acquire helpers', () => {
+  it('isSignedIn requires a non-empty userid on the ledger domain', () => {
+    expect(isSignedIn([fakeCookie('userid', '123')])).toBe(true)
+    expect(isSignedIn([fakeCookie('userid', '')])).toBe(false)
+    expect(isSignedIn([fakeCookie('other', 'x')])).toBe(false)
+    expect(isSignedIn([fakeCookie('userid', '123', '.baidu.com')])).toBe(false)
+  })
+
+  it('cookiesToHeader keeps only ledger-domain cookies and normalizes the header', () => {
+    const header = cookiesToHeader([
+      fakeCookie('userid', '123'),
+      fakeCookie('sess', 'abc', 'other.com'),
+      fakeCookie('visited', '1', '10jqka.com.cn'),
+    ])
+    expect(header).toBe('userid=123; visited=1')
+  })
+
+  it('fails fast with an actionable hint when playwright-core is missing', async () => {
+    const saved: string[] = []
+    const acq = new CookieAcquirer({
+      save: async v => { saved.push(v) },
+      resolvePlaywright: () => undefined,
+    })
+    const st = await acq.start()
+    expect(st.state).toBe('failed')
+    expect(st.error).toContain('playwright-core')
+    expect(st.hint).toBeTruthy()
+    expect(saved).toEqual([])
+    await acq.dispose()
+  })
+
+  it('launches a visible edge window, waits for the sign-in, then commits the cookie', async () => {
+    const saved: string[] = []
+    const fw = fakePlaywright([fakeCookie('sid', 'pre')])
+    const acq = new CookieAcquirer({
+      save: async v => { saved.push(v) },
+      resolvePlaywright: () => fw.module,
+      pollMs: 5,
+      timeoutMs: 60_000,
+    })
+    expect((await acq.start()).state).toBe('acquiring')
+    // Not signed in yet: status stays acquiring and nothing is saved.
+    expect((await acq.check()).state).toBe('acquiring')
+    expect(saved).toEqual([])
+    // The human signs in -> the next probe commits the cookie.
+    fw.setCookies([fakeCookie('userid', '825299250'), fakeCookie('sid', 'abc')])
+    expect((await acq.check()).state).toBe('saved')
+    expect(saved).toEqual(['userid=825299250; sid=abc'])
+    expect(fw.browser.closed).toBe(true) // The window closes itself after saving.
+    await acq.dispose()
+  })
+
+  it('times out when the sign-in never happens', async () => {
+    const fw = fakePlaywright([fakeCookie('sid', 'pre')])
+    const acq = new CookieAcquirer({
+      save: async () => {},
+      resolvePlaywright: () => fw.module,
+      pollMs: 5,
+      timeoutMs: 20,
+    })
+    expect((await acq.start()).state).toBe('acquiring')
+    // Fast-forward past the timeout: with a 5ms poll cadence and a 20ms budget,
+    // the probe trips the deadline almost immediately.
+    await new Promise(resolve => setTimeout(resolve, 60))
+    const st = await acq.check()
+    expect(st.state).toBe('failed')
+    expect(st.error).toContain('超时')
+    await acq.dispose()
+  })
+
+  it('cancel abandons a run and returns to idle without saving', async () => {
+    const saved: string[] = []
+    const fw = fakePlaywright([fakeCookie('sid', 'pre')])
+    const acq = new CookieAcquirer({
+      save: async v => { saved.push(v) },
+      resolvePlaywright: () => fw.module,
+      pollMs: 5,
+    })
+    expect((await acq.start()).state).toBe('acquiring')
+    expect((await acq.cancel()).state).toBe('idle')
+    expect(saved).toEqual([])
+    expect(fw.browser.closed).toBe(true)
+    await acq.dispose()
+  })
+})
+
+describe('verifyCookie', () => {
+  it('reports a missing cookie', async () => {
+    const result = await verifyCookie(undefined)
+    expect(result.valid).toBe(false)
+    expect(result.reason).toBe('missing')
+  })
+
+  it('rejects a cookie without a userid field', async () => {
+    const result = await verifyCookie('sid=abc', undefined, async () => jsonResponse({}))
+    expect(result.valid).toBe(false)
+    expect(result.reason).toBe('no-userid')
+  })
+
+  it('flags HTTP 401/403 as expired with a re-login hint', async () => {
+    const fetchImpl: FetchLike = async (_url, init) => {
+      expect(init.redirect).toBe('manual')
+      return new Response('', { status: 401 })
+    }
+    const result = await verifyCookie('userid=825299250; sid=abc', undefined, fetchImpl)
+    expect(result.valid).toBe(false)
+    expect(result.reason).toBe('expired')
+    expect(result.hint).toContain('自动获取')
+  })
+
+  it('passes when the ledger accepts the cookie and lists portfolios', async () => {
+    const fetchImpl: FetchLike = async (_url, init) => {
+      expect(new Headers(init.headers).get('cookie')).toContain('sid=abc')
+      return jsonResponse({
+        error_code: '0',
+        ex_data: { common: [{ fund_key: 'k1', manualname: '组合A', brokername: '华泰' }] },
+      })
+    }
+    const result = await verifyCookie('userid=u042; sid=abc', undefined, fetchImpl)
+    expect(result.valid).toBe(true)
+    expect(result.reason).toBe('ok')
+    expect(result.portfolios).toEqual([{ fund_key: 'k1', manualname: '组合A', brokername: '华泰' }])
+  })
+
+  it('reports a rejected envelope with the ledger message', async () => {
+    const fetchImpl: FetchLike = async () => jsonResponse({ error_code: '1', error_msg: '需要登录' })
+    const result = await verifyCookie('userid=u042; sid=abc', undefined, fetchImpl)
+    expect(result.valid).toBe(false)
+    expect(result.reason).toBe('rejected')
+    expect(result.error).toContain('需要登录')
+    expect(result.hint).toContain('重新登录')
+  })
+})
 
 describe('real Loader composition', () => {
   it('serves /api/stock-pnl with the Cookie, and unknown routes 404', { timeout: 60_000 }, async () => {

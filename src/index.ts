@@ -11,7 +11,8 @@ import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { credentialRef } from '@deepseek-ai/dsh-credentials'
 import type { WebRoute } from '@deepseek-ai/dsh-host-webserver'
-import { collectStats, fetchFundKey, INDEX_URL, listPortfolios, PNL_URL, type Portfolio } from './fetch.ts'
+import { CookieAcquirer, resolvePlaywright } from './acquire.ts'
+import { collectStats, fetchFundKey, INDEX_URL, listPortfolios, PNL_URL, type Portfolio, verifyCookie } from './fetch.ts'
 import type { Stats } from './types.ts'
 
 export const name = 'ui-stock-pnl'
@@ -170,4 +171,45 @@ export function apply(ctx: Context, config: Config = {}): void {
     },
   }
   ctx.effect(() => ctx.webServer.register(portfolioRoute), 'ui-stock-pnl: /api/stock-pnl/portfolios route')
+
+  // Register one exact route for the life of the plugin fiber.
+  const addRoute = (path: string, handler: WebRoute['handler']): void => {
+    ctx.effect(() => ctx.webServer.register({ kind: 'exact', path, handler }), `ui-stock-pnl: ${path}`)
+  }
+
+  // Auto-acquire: a visible Edge window waits for the sign-in, then its Cookie
+  // is committed through the same reference the snapshot route reads.
+  const acquirer = new CookieAcquirer({
+    resolvePlaywright,
+    save: async cookie => {
+      await ctx.credentials.set(credentialRef(spec.cookieEnv), cookie)
+    },
+  })
+  ctx.effect(() => async () => { await acquirer.dispose() }, 'ui-stock-pnl: acquire teardown')
+
+  // Verify: probe the ledger with the stored Cookie and report whether it works.
+  const verifyHandler: WebRoute['handler'] = async (_req, res) => {
+    try {
+      const cookie = await resolveCredential(ctx, spec.cookieEnv)
+      const user = spec.user_id.length > 0 ? spec.user_id : undefined
+      const result = await verifyCookie(cookie, user)
+      writeJson(res, 200, {
+        configured: cookie !== undefined && cookie.length > 0,
+        valid: result.valid,
+        ...(result.error !== undefined ? { error: result.error } : {}),
+        ...(result.hint !== undefined ? { hint: result.hint } : {}),
+        ...(result.portfolios !== undefined ? { portfolios: result.portfolios } : {}),
+      })
+    } catch (error) {
+      ctx.logger.warn(error instanceof Error ? error : new Error(String(error)))
+      writeJson(res, 200, { configured: false, valid: false, error: '验证失败' })
+    }
+  }
+  addRoute('/api/stock-pnl/verify', verifyHandler)
+
+  // Auto-acquire lifecycle: start / status / immediate-check / cancel.
+  addRoute('/api/stock-pnl/acquire', async (_req, res) => { writeJson(res, 200, await acquirer.start()) })
+  addRoute('/api/stock-pnl/acquire/status', (_req, res) => { writeJson(res, 200, acquirer.status()) })
+  addRoute('/api/stock-pnl/acquire/check', async (_req, res) => { writeJson(res, 200, await acquirer.check()) })
+  addRoute('/api/stock-pnl/acquire/cancel', async (_req, res) => { writeJson(res, 200, await acquirer.cancel()) })
 }

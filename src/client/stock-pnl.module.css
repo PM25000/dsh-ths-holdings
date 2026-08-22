@@ -251,3 +251,121 @@
   opacity: 0.55;
   text-align: center;
 }
+
+.settingsHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.badge {
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.badgeOk {
+  background: rgba(34, 197, 94, 0.18);
+  color: #22c55e;
+}
+
+.badgeBad {
+  background: rgba(239, 68, 68, 0.18);
+  color: #ef4444;
+}
+
+.badgeMuted {
+  background: rgba(255, 255, 255, 0.1);
+  color: inherit;
+  opacity: 0.7;
+}
+
+.acqRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.acqTip {
+  font-size: 11px;
+  opacity: 0.6;
+}
+
+.autoBtn {
+  padding: 6px 12px;
+  border: none;
+  border-radius: 8px;
+  background: rgba(34, 197, 94, 0.22);
+  color: #22c55e;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.autoBtn:hover {
+  background: rgba(34, 197, 94, 0.32);
+}
+
+.autoBtn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.acqPanel {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.acqStatus {
+  font-size: 12px;
+}
+
+.acqActions {
+  display: flex;
+  gap: 8px;
+}
+
+.ghostBtn {
+  padding: 4px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 6px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.ghostBtn:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.manualHint {
+  font-size: 11px;
+  opacity: 0.65;
+  line-height: 1.6;
+}
+
+.link {
+  color: #60a5fa;
+  text-decoration: none;
+}
+
+.link:hover {
+  text-decoration: underline;
+}
+
+.code {
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 4px;
+  padding: 0 4px;
+  font-family: var(--dsw-mono, 'Cascadia Code', Consolas, monospace);
+  font-size: 10px;
+}

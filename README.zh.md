@@ -47,17 +47,30 @@ dsh plugin --profile web add dsh-ths-holdings
 
 ## 使用
 
+**推荐方式（自动获取）**：
+
+1. 打开 DSH 网页 GUI，点击卡片上的 **⚙**。
+2. 点击 **🖥 自动获取 Cookie（推荐）**——会弹出系统 Edge 浏览器窗口。
+3. 在弹出的窗口里完成同花顺投资账本登录（扫码 / 账号密码）。
+4. 登录成功后窗口自动关闭，Cookie 自动保存，卡片立即刷新并显示你的持仓。
+5. 插件自动发现你的组合——如有多个，从下拉框选一个即可。
+
+> 需要浏览器自动化支持：首次使用前需安装 `npm i -g playwright-core`（纯 JS、无需下载浏览器，直接复用系统 Edge）。未安装时卡片会提示安装命令，自动获取退化为手动粘贴。
+>
+> 自动获取的 Edge 窗口带有反自动化伪装（隐藏 `navigator.webdriver`、关闭 AutomationControlled 特性）以通过同花顺风控。若个别网络/时段下页面仍显示 **Nginx forbidden**，在弹出窗口里按 `F5` 刷新或手动访问 [https://tzzb.10jqka.com.cn](https://tzzb.10jqka.com.cn) 即可，登录完成后点卡片上的「**我已登录，继续 →**」；Cookie 仅保留 `10jqka` 域字段，不会整段明文落盘。
+
+**手动方式（无需任何安装）**：
+
 1. 打开 [https://tzzb.10jqka.com.cn](https://tzzb.10jqka.com.cn) 并登录。
 2. 按 **F12 → 控制台**，运行：
    ```javascript
    copy(document.cookie)
    ```
 3. Cookie 已复制到剪贴板。
-4. 打开 DSH 网页 GUI，点击卡片上的 **⚙**。
-5. 把 Cookie 粘贴进 **STOCK_PNL_COOKIE** → **保存**。
-6. 插件自动发现你的组合——如有多个，从下拉框选一个即可。
+4. 打开 DSH 网页 GUI，点击卡片上的 **⚙**，把 Cookie 粘贴进 **STOCK_PNL_COOKIE** → **保存**。
+5. 保存后卡片会当场校验 Cookie——显示 **✓ 有效** 或 **✗ 无效**（无效会给出原因与提示）。
 
-会话 Cookie 会过期——过期时卡片显示 **Token 已过期** 横幅，重复步骤 1–5 贴新的即可（`v` 反爬令牌自动处理，无需关心）。
+会话 Cookie 会过期——过期时卡片显示 **Token 已过期** 横幅，重开 ⚙ 点 **自动获取**（或重复手动步骤 1–4）即可（`v` 反爬令牌自动处理，无需关心）。
 
 > 💡 完成一笔新交易后，请在投资账本 **APP** 上重新上传数据到网页版，避免两端持仓不一致。
 >
@@ -70,6 +83,8 @@ dsh plugin --profile web add dsh-ths-holdings
 - **📈 当日走势图** — 迷你折线 + 零轴虚线，红涨绿跌
 - **🇨🇳 上证指数** — 与你的盈亏并列显示
 - **🔄 自动发现** — `fund_key` 从组合列表自动获取；多账户可通过下拉框选择
+- **🖥 自动获取 Cookie** — 一键弹出 Edge 登录窗口，登录即自动保存，无需 F12
+- **✓ 保存即校验** — 粘贴或自动获取后当场验证 Cookie 是否被账本接受
 - **↕ 可拖动** — 沿右侧边缘上下拖动标题栏（位置存 localStorage）
 - **⚙ 就地设置** — 粘贴 Cookie、选择组合，全在卡片上完成
 - **🔒 凭据安全** — Cookie 始终留在宿主进程
@@ -89,6 +104,8 @@ dsh plugin --profile web add dsh-ths-holdings
 │  cordis 插件：webServer 路由             │
 │  · GET /api/stock-pnl          快照      │
 │  · GET /api/stock-pnl/portfolios 账户列表 │
+│  · GET /api/stock-pnl/verify    Cookie 校验 │
+│  · POST /api/stock-pnl/acquire*  自动登录 │
 │  通过 ctx.credentials 解析 Cookie        │
 │  自动发现 user_id + fund_key             │
 │  POST 同花顺账本 API                     │
@@ -96,6 +113,8 @@ dsh plugin --profile web add dsh-ths-holdings
 ```
 
 node 半区每次请求通过凭据引用通道（`ctx.credentials`）读取登录 Cookie——浏览器端永远看不到它。携带凭据的请求不跟随重定向。`v` 反爬令牌按 User-Agent 每次现算，存储的 Cookie 只需会话字段。
+
+「自动获取 Cookie」走宿主进程内的 `acquire.ts` 状态机：点按钮 → 弹出反自动化的 Edge 窗口打开投资账本 → 检测到登录态（`userid` cookie）后自动收集该域 Cookie、写入凭据并关闭窗口；超时 / 用户关窗 / 页面被风控拦截都会在卡片上显示可操作提示。
 
 ## 配置
 
@@ -115,14 +134,15 @@ node 半区每次请求通过凭据引用通道（`ctx.credentials`）读取登�
 dsh-ths-holdings/
 ├── src/
 │   ├── index.ts            # node 半区：webServer 路由 + 凭据解析
-│   ├── fetch.ts            # 同花顺账本 API 调用 + 自动发现
+│   ├── fetch.ts            # 同花顺账本 API 调用 + 自动发现 + Cookie 校验
+│   ├── acquire.ts          # 自动获取 Cookie（playwright-core 驱动 Edge）
 │   └── client/
 │       ├── index.ts        # 浏览器半区：shell.overlay 注册
 │       └── StockPnlCard.tsx
 ├── lib/                    # 构建产物（index.js + client.js）
 ├── cordis.patch.yml        # dsh.bundle 补丁层
 ├── package.json            # dsh.bundle + dsh.client 清单
-├── tests/                  # 账本获取单元测试
+├── tests/                  # 账本获取 / 校验 / 自动获取单元测试
 └── README.md
 ```
 
@@ -130,9 +150,13 @@ dsh-ths-holdings/
 
 | 现象 | 原因与解决 |
 |---|---|
-| 卡片显示 `请配置 Cookie` | `STOCK_PNL_COOKIE` 为空——在 ⚙ 面板粘贴你的 Cookie。 |
-| 卡片显示 `Token 已过期` | 会话 Cookie 过期——重新执行 `copy(document.cookie)` 并粘贴新的。 |
-| 下拉框没有组合 | 组合列表需要有效的 Cookie——先保存 Cookie，再点 ↻ 刷新。 |
+| 卡片显示 `请配置 Cookie` | `STOCK_PNL_COOKIE` 为空——在 ⚙ 面板点「自动获取」或手动粘贴。 |
+| 卡片显示 `Token 已过期` | 会话 Cookie 过期——在 ⚙ 面板点「自动获取」重新登录，或手动重新 `copy(document.cookie)` 粘贴。 |
+| 点「自动获取」提示缺少 playwright-core | 尚未安装浏览器自动化库——执行 `npm i -g playwright-core` 后**重启 dsh web** 再试；不想安装可改用手动粘贴。 |
+| 自动获取弹出窗口后没有反应 | 在弹出窗口完成登录（扫码 / 账号），登录后窗口会自动关闭并保存。 |
+| 弹出窗口显示 `Nginx forbidden` | 同花顺风控偶发拦截——在窗口里 F5 刷新或手动访问登录页重试；登录完成后点「我已登录，继续 →」。 |
+| 保存后徽标显示 `✗ 无效` | 粘贴的 Cookie 已失效或不是投资账本会话——重新登录获取后再试；面板会给出具体原因。 |
+| 下拉框没有组合 | 组合列表需要有效的 Cookie——先保存有效 Cookie，再点 ↻ 刷新。 |
 | 有多个组合 | 从下拉框选一个——选择会保存为 `STOCK_PNL_FUND_KEY`。 |
 | 粘贴的 Cookie 带换行 | 插件保存时会去掉空白，换行粘贴也没问题。 |
 
@@ -148,6 +172,7 @@ dsh-ths-holdings/
 
 - **账本 API 是未公开的、需登录的端点** — 响应格式可能变化，Cookie 会过期；插件以错误呈现，而不是重试或缓存。
 - **组合列表端点（`account_list`）需要先保存 Cookie** — 粘贴有效 Cookie 后组合选择器才会出现。
+- **自动获取依赖 playwright-core 与系统 Edge** — 未安装或无 Edge 时自动获取不可用（退化为手动粘贴）；卡片会给出明确提示。
 - **无服务端轮询** — 路由按请求拉取，卡片按配置的 `pollMs` 间隔轮询；没有共享缓存或推送通道。
 
 ## License

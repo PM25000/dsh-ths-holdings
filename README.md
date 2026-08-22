@@ -48,17 +48,30 @@ then `cd $DSH_HOME/profiles/web && pnpm install` and restart `dsh web`. The plug
 
 ## Usage
 
+**Recommended — auto-acquire:**
+
+1. Open the DSH web GUI — click **⚙** on the card.
+2. Click **🖥 自动获取 Cookie（推荐）** — the system Edge browser opens in a visible window.
+3. Sign in to the Tonghuashun investment ledger in that window (QR code / account).
+4. When the sign-in succeeds the window closes itself, the Cookie is saved automatically, and the card refreshes with your portfolio.
+5. The plugin auto-discovers your portfolio — if you have several, pick one from the dropdown. Done.
+
+> Requires browser automation: install once with `npm i -g playwright-core` (pure JS, no browser download — the system Edge is reused). If it is missing, the card shows the install command and auto-acquire degrades to manual paste.
+>
+> The auto-acquired Edge window ships anti-automation camouflage (hides `navigator.webdriver`, disables the AutomationControlled Blink feature) to pass the Tonghuashun WAF. If a specific network/time still shows **Nginx forbidden**, press `F5` in the popped window or open [https://tzzb.10jqka.com.cn](https://tzzb.10jqka.com.cn) manually, then click **「我已登录，继续 →」** on the card; only `10jqka`-domain cookies are kept, never stored as raw plaintext.
+
+**Manual (no install):**
+
 1. Open [https://tzzb.10jqka.com.cn](https://tzzb.10jqka.com.cn) and log in.
 2. Press **F12 → Console** and run:
    ```javascript
    copy(document.cookie)
    ```
 3. The cookie is now in your clipboard.
-4. Open the DSH web GUI — click **⚙** on the card.
-5. Paste the cookie into **STOCK_PNL_COOKIE** → **save**.
-6. The plugin auto-discovers your portfolio — if you have several, pick one from the dropdown. Done.
+4. Open the DSH web GUI — click **⚙** on the card, paste the cookie into **STOCK_PNL_COOKIE** → **save**.
+5. The card validates the saved cookie immediately — it shows **✓ valid** or **✗ invalid** (with the reason/hint).
 
-The session cookie expires eventually — when it does, the card shows a **Token 已过期** banner; repeat steps 1–5 with a fresh cookie (the `v` anti-bot token is handled automatically).
+The session cookie expires eventually — when it does, the card shows a **Token 已过期** banner; re-open ⚙ and click **auto-acquire** (or repeat manual steps 1–4) with a fresh cookie (the `v` anti-bot token is handled automatically).
 
 > 💡 After completing a new trade, re-upload your data from the investment-ledger **app** to the web version so your holdings stay consistent between the two.
 >
@@ -71,6 +84,8 @@ The session cookie expires eventually — when it does, the card shows a **Token
 - **📈 Intraday chart** — mini polyline with a zero axis, red-up/green-down
 - **🇨🇳 Shanghai Composite Index** — displayed alongside your P&L
 - **🔄 Auto-discovery** — `fund_key` is discovered from the portfolio list; multi-account selection via dropdown
+- **🖥 Auto-acquire Cookie** — one click pops the Edge sign-in window; the cookie is saved automatically, no F12 needed
+- **✓ Validate on save** — the stored cookie is checked against the ledger right after paste or auto-acquire
 - **↕ Draggable** — drag the title bar vertically along the right edge (position persists in localStorage)
 - **⚙ In-place settings** — paste Cookie and select portfolio from the card itself
 - **🔒 Credential-safe** — the Cookie never leaves the host process
@@ -90,6 +105,8 @@ The session cookie expires eventually — when it does, the card shows a **Token
 │  cordis plugin: webServer routes          │
 │  · GET /api/stock-pnl          snapshot    │
 │  · GET /api/stock-pnl/portfolios  accounts │
+│  · GET /api/stock-pnl/verify     cookie ok?│
+│  · POST /api/stock-pnl/acquire*   sign-in │
 │  resolves Cookie via ctx.credentials      │
 │  auto-discovers user_id + fund_key        │
 │  POSTs Tonghuashun ledger APIs            │
@@ -97,6 +114,8 @@ The session cookie expires eventually — when it does, the card shows a **Token
 ```
 
 The node half reads the login Cookie per request through the credential-reference seam (`ctx.credentials`) — it never reaches the browser. Credential-bearing requests never follow a redirect. The `v` anti-bot token is minted per request from the User-Agent; the stored Cookie only needs its session fields.
+
+Auto-acquire runs an in-host state machine (`acquire.ts`): click the button → an anti-automation Edge window opens the ledger → once the sign-in is detected (`userid` cookie), the host collects that domain's cookies, commits them through the credential seam, and closes the window. Timeout, an early user window-close, or a WAF interception all surface as actionable notices on the card.
 
 ## Config
 
@@ -116,14 +135,15 @@ The node half reads the login Cookie per request through the credential-referenc
 dsh-ths-holdings/
 ├── src/
 │   ├── index.ts            # node half: webServer routes + credential resolution
-│   ├── fetch.ts            # Tonghuashun ledger API calls + auto-discovery
+│   ├── fetch.ts            # Tonghuashun ledger API calls + auto-discovery + cookie verify
+│   ├── acquire.ts          # auto-acquire cookie (playwright-core drives Edge)
 │   └── client/
 │       ├── index.ts        # browser half: shell.overlay registration
 │       └── StockPnlCard.tsx
 ├── lib/                    # built artifacts (index.js + client.js)
 ├── cordis.patch.yml        # dsh.bundle patch layer
 ├── package.json            # dsh.bundle + dsh.client manifests
-├── tests/                  # ledger acquisition unit tests
+├── tests/                  # ledger / verify / acquire unit tests
 └── README.md
 ```
 
@@ -131,8 +151,10 @@ dsh-ths-holdings/
 
 | Symptom | Cause & fix |
 |---|---|
-| Card shows `请配置 Cookie` | `STOCK_PNL_COOKIE` is empty — paste your cookie in the ⚙ panel. |
-| Card shows `Token 已过期` | The session Cookie expired — re-run `copy(document.cookie)` and paste the fresh one. |
+| Card shows `请配置 Cookie` | `STOCK_PNL_COOKIE` is empty — click **auto-acquire** in the ⚙ panel, or paste manually. |
+| Card shows `Token 已过期` | The session Cookie expired — click **auto-acquire** in the ⚙ panel to re-sign-in, or re-run `copy(document.cookie)` and paste. |
+| Auto-acquire reports missing playwright-core | Browser automation is not installed — run `npm i -g playwright-core`, restart `dsh web`, retry; manual paste works without it. |
+| Popped window shows `Nginx forbidden` | The Tonghuashun WAF intermittently refuses automation — F5 in the window or open the ledger URL manually, then click **「我已登录，继续 →」**. |
 | No portfolio in the dropdown | The account list needs a valid Cookie first; save the Cookie, then click ↻ to refresh. |
 | Multiple portfolios | Select the one you want from the dropdown — the choice is saved as `STOCK_PNL_FUND_KEY`. |
 | Cookie pasted with line breaks | The plugin strips whitespace on save, so wrapped lines are fine. |
@@ -149,6 +171,7 @@ None — the plugin contributes no prompt, schema, or result.
 
 - **The ledger API is an undocumented, login-gated endpoint** — its response format can change and the Cookie expires; the plugin surfaces both as errors rather than retrying or caching.
 - **The portfolio list endpoint (`account_list`) requires the Cookie to be saved first** — the portfolio selector appears after you paste a valid Cookie.
+- **Auto-acquire needs playwright-core and the system Edge** — without them auto-acquire is unavailable (manual paste still works); the card says so explicitly.
 - **No server-side polling** — the route fetches on each request and the card polls at the configured `pollMs` interval; there is no shared cache or push channel.
 
 ## License

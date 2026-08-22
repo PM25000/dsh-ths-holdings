@@ -20,7 +20,7 @@
     "rootDir": "src",
     "outDir": "lib/types",
     "lib": ["ES2024", "DOM", "DOM.Iterable"],
-    "types": []
+    "types": ["node"]
   },
   "include": ["src"]
 }

@@ -1,7 +1,7 @@
 {
   "name": "dsh-ths-holdings",
   "description": "DSH 持仓盈亏悬浮卡片（同花顺投资账本）— 自动同步真实持仓数据，显示今日盈亏、上证指数和当日走势图，无需手动添加股票。Real portfolio holdings overlay for the DSH web GUI — automatically syncs your positions from the Tonghuashun investment-ledger API.",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "publishConfig": {
     "access": "public"
   },
@@ -58,15 +58,18 @@
   "dependencies": {
     "clsx": "^2.0.0"
   },
+  "optionalDependencies": {
+    "playwright-core": "^1.62.1"
+  },
   "peerDependencies": {
-    "@deepseek-ai/cordis": "^4.0.1-rc.4",
-    "@deepseek-ai/schemastery": "^3.18.1-rc.4",
-    "@deepseek-ai/dsh-credentials": "^0.1.0-rc.6",
-    "@deepseek-ai/dsh-host-webserver": "^0.1.0-rc.6",
-    "@deepseek-ai/dsh-api-remotes": "^0.1.0-rc.6",
-    "@deepseek-ai/dsh-client-runtime": "^0.1.0-rc.6",
-    "@deepseek-ai/dsh-client-ui-layout": "^0.1.0-rc.6",
-    "@deepseek-ai/dsh-invariants": "^0.1.0-rc.6",
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-api-remotes": "^0.1.1-rc.2",
+    "@deepseek-ai/dsh-client-runtime": "^0.1.1-rc.2",
+    "@deepseek-ai/dsh-client-ui-layout": "^0.1.1-rc.2",
+    "@deepseek-ai/dsh-credentials": "^0.1.1-rc.2",
+    "@deepseek-ai/dsh-host-webserver": "^0.1.1-rc.2",
+    "@deepseek-ai/dsh-invariants": "^0.1.1-rc.2",
+    "@deepseek-ai/schemastery": "^3.18.1",
     "react": "^18.2.0"
   },
   "peerDependenciesMeta": {
@@ -99,16 +102,20 @@
     }
   },
   "devDependencies": {
-    "@deepseek-ai/cordis": "^4.0.1-rc.4",
-    "@deepseek-ai/schemastery": "^3.18.1-rc.4",
-    "@deepseek-ai/dsh-credentials": "^0.1.0-rc.6",
-    "@deepseek-ai/dsh-host-webserver": "^0.1.0-rc.6",
-    "@deepseek-ai/dsh-api-remotes": "^0.1.0-rc.6",
-    "@deepseek-ai/dsh-client-runtime": "^0.1.0-rc.6",
-    "@deepseek-ai/dsh-client-ui-layout": "^0.1.0-rc.6",
-    "@deepseek-ai/dsh-invariants": "^0.1.0-rc.6",
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/cordis-plugin-include": "1.0.6",
+    "@deepseek-ai/cordis-plugin-loader": "1.0.2",
+    "@deepseek-ai/dsh-api-remotes": "^0.1.1-rc.2",
+    "@deepseek-ai/dsh-client-runtime": "^0.1.1-rc.2",
+    "@deepseek-ai/dsh-client-ui-layout": "^0.1.1-rc.2",
+    "@deepseek-ai/dsh-credentials": "^0.1.1-rc.2",
+    "@deepseek-ai/dsh-host-webserver": "^0.1.1-rc.2",
+    "@deepseek-ai/dsh-invariants": "^0.1.1-rc.2",
+    "@deepseek-ai/schemastery": "^3.18.1",
+    "@types/node": "^26.2.0",
     "@types/react": "~18.3.1",
     "lightningcss": "^1.25.0",
+    "playwright-core": "^1.62.1",
     "tsdown": "^0.22.0",
     "typescript": "^5.7.0"
   },

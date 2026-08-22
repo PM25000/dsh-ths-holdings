@@ -41,6 +41,11 @@ const config: UserConfig[] = [
     fixedExtension: false,
     dts: { outputDir: 'lib/types' },
     clean: false,
+    // playwright-core is resolved at runtime through a multi-anchor loader
+    // (global npm root / profile / plugin node_modules) so the auto-acquire
+    // feature degrades to a hint when it is not installed. It must not be
+    // bundled into the plugin.
+    external: ['playwright-core'],
   },
   // ── Browser client bundle ──
   {

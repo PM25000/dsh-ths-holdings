@@ -153,6 +153,32 @@ export interface Portfolio {
   readonly brokername: string
 }
 
+/** One verified-Cookie answer (the user-visible verify route payload). */
+export interface VerifyResult {
+  readonly valid: boolean
+  readonly reason: 'missing' | 'no-userid' | 'expired' | 'redirected' | 'http' | 'parse' | 'rejected' | 'ok'
+  /** Human-readable diagnostics for the invalid case. */
+  readonly error?: string
+  /** Actionable hint (e.g. re-sign in). */
+  readonly hint?: string
+  /** Portfolio accounts visible to the authenticated Cookie. */
+  readonly portfolios?: readonly Portfolio[]
+}
+
+/**
+ * Normalize the account-list payload into portfolio rows (empty when absent).
+ * @param body - the decoded account_list response.
+ * @returns the portfolio rows with a non-empty fund_key.
+ */
+function parsePortfolios(body: { ex_data?: { common?: ReadonlyArray<Record<string, unknown>> } }): Portfolio[] {
+  const common = body.ex_data?.common ?? []
+  return common.map(item => ({
+    fund_key: String(item.fund_key ?? ''),
+    manualname: String(item.manualname ?? ''),
+    brokername: String(item.brokername ?? ''),
+  })).filter(portfolio => portfolio.fund_key.length > 0)
+}
+
 /**
  * Query the portfolio list and return every account. Silently returns `[]` on
  * any network or parse failure so the caller can fall back gracefully.
@@ -168,15 +194,71 @@ export async function listPortfolios(cookie: string, user_id: string): Promise<r
     if (!response.ok) return []
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const body = (await response.json()) as any
-    const common: readonly any[] = body?.ex_data?.common ?? []
-    return common.map((item: any) => ({
-      fund_key: item.fund_key as string,
-      manualname: item.manualname as string,
-      brokername: item.brokername as string,
-    })).filter(p => p.fund_key)
+    return parsePortfolios(body)
   } catch {
     return []
   }
+}
+
+/**
+ * Probe the ledger account-list endpoint with the stored Cookie and report
+ * whether it is accepted. A 401/403 means the Cookie expired; a 200 with a
+ * rejected envelope means the ledger refused the session; any other failure is
+ * reported as-is (the ledger call must not be retried or followed).
+ * @param cookie - the stored Cookie, or undefined when nothing is configured.
+ * @param user_id - explicit user id, or undefined to derive it from the Cookie.
+ * @param fetchImpl - executor override for tests.
+ * @returns the structured verdict, never throwing.
+ */
+export async function verifyCookie(
+  cookie: string | undefined,
+  user_id?: string,
+  fetchImpl: FetchLike = defaultFetch,
+): Promise<VerifyResult> {
+  if (cookie === undefined || cookie.length === 0) {
+    return { valid: false, reason: 'missing', error: '未配置 Cookie（请粘贴或自动获取）' }
+  }
+  const normalized = normalizeCookie(cookie)
+  const uid = (user_id ?? '').length > 0 ? user_id : cookieField(normalized, 'userid')
+  if (uid === undefined || uid.length === 0) {
+    return { valid: false, reason: 'no-userid', error: 'Cookie 缺少 userid 字段，可能已失效' }
+  }
+  let response: Response
+  try {
+    response = await fetchImpl(ACCOUNT_LIST_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': UA, Cookie: normalized },
+      body: `terminal=1&version=0.0.0&userid=${uid}&user_id=${uid}`,
+      redirect: 'manual',
+    })
+  } catch (error) {
+    return { valid: false, reason: 'http', error: `网络错误: ${(error as Error).message}` }
+  }
+  if (REDIRECT_STATUSES.has(response.status)) {
+    return { valid: false, reason: 'redirected', error: `接口重定向未跟随 (HTTP ${response.status})` }
+  }
+  if (response.status === 401 || response.status === 403) {
+    return { valid: false, reason: 'expired', error: 'Cookie 已过期（Token 无效），请重新登录获取', hint: '点击「自动获取 Cookie」或重新粘贴' }
+  }
+  if (!response.ok) {
+    return { valid: false, reason: 'http', error: `HTTP ${response.status}` }
+  }
+  let body: { error_code?: string; error_msg?: string; ex_data?: { common?: ReadonlyArray<Record<string, unknown>> } }
+  try {
+    body = (await response.json()) as typeof body
+  } catch {
+    return { valid: false, reason: 'parse', error: '响应解析失败' }
+  }
+  if (body.error_code !== undefined && body.error_code !== '0') {
+    const message = String(body.error_msg ?? '未知错误')
+    return {
+      valid: false,
+      reason: 'rejected',
+      error: `账本拒绝请求: ${message}`,
+      hint: message.includes('登录') ? '请重新登录获取新的 Cookie' : undefined,
+    }
+  }
+  return { valid: true, reason: 'ok', portfolios: parsePortfolios(body) }
 }
 
 /** Inputs for one snapshot acquisition. */
