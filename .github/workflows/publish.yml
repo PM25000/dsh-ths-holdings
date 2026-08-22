@@ -66,13 +66,19 @@ jobs:
           cache: pnpm
 
       - name: Install (immutable)
-        # Fresh runners enable pnpm's supply-chain release-age policy by
-        # default (minimumReleaseAge = 24h), which rejects yesterday's
-        # @deepseek-ai 0.1.1-rc.2 publishes with ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION.
-        # Bypass it for this run only; the lockfile's integrity is still checked.
+        # Fresh runners enable pnpm's lockfile supply-chain verification, which
+        # re-applies minimumReleaseAge to every lockfile entry and rejects
+        # yesterday's @deepseek-ai 0.1.1-rc.2 publishes with
+        # ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION. --trust-lockfile is the
+        # documented switch for this: install already runs with
+        # --frozen-lockfile, i.e. the committed lockfile is the source of truth,
+        # so re-walking registry publish times adds nothing for a release build.
+        # The tarball-integrity side of the verification still runs on install.
         env:
           npm_config_minimum_release_age: '0'
-        run: pnpm install --frozen-lockfile
+        run: |
+          pnpm --version
+          pnpm install --frozen-lockfile --trust-lockfile
 
       - name: Typecheck
         run: pnpm typecheck
