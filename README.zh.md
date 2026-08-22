@@ -50,16 +50,14 @@ dsh plugin --profile web add dsh-ths-holdings
 **推荐方式（自动获取）**：
 
 1. 打开 DSH 网页 GUI，点击卡片上的 **⚙**。
-2. 点击 **🖥 自动获取 Cookie（推荐）**——会弹出系统 Edge 浏览器窗口。
+2. 点击 **🖥 自动获取 Cookie（推荐）**——会弹出系统浏览器窗口（Edge / Chrome，自动选择已安装者）。
 3. 在弹出的窗口里完成同花顺投资账本登录（扫码 / 账号密码）。
 4. 登录成功后窗口自动关闭，Cookie 自动保存，卡片立即刷新并显示你的持仓。
 5. 插件自动发现你的组合——如有多个，从下拉框选一个即可。
 
-> 需要浏览器自动化支持：首次使用前需安装 `npm i -g playwright-core`（纯 JS、无需下载浏览器，直接复用系统 Edge）。未安装时卡片会提示安装命令，自动获取退化为手动粘贴。
->
 > 自动获取的 Edge 窗口带有反自动化伪装（隐藏 `navigator.webdriver`、关闭 AutomationControlled 特性）以通过同花顺风控。若个别网络/时段下页面仍显示 **Nginx forbidden**，在弹出窗口里按 `F5` 刷新或手动访问 [https://tzzb.10jqka.com.cn](https://tzzb.10jqka.com.cn) 即可，登录完成后点卡片上的「**我已登录，继续 →**」；Cookie 仅保留 `10jqka` 域字段，不会整段明文落盘。
 
-**手动方式（无需任何安装）**：
+**手动方式（如偶尔需要）**：
 
 1. 打开 [https://tzzb.10jqka.com.cn](https://tzzb.10jqka.com.cn) 并登录。
 2. 按 **F12 → 控制台**，运行：
@@ -152,7 +150,7 @@ dsh-ths-holdings/
 |---|---|
 | 卡片显示 `请配置 Cookie` | `STOCK_PNL_COOKIE` 为空——在 ⚙ 面板点「自动获取」或手动粘贴。 |
 | 卡片显示 `Token 已过期` | 会话 Cookie 过期——在 ⚙ 面板点「自动获取」重新登录，或手动重新 `copy(document.cookie)` 粘贴。 |
-| 点「自动获取」提示缺少 playwright-core | 尚未安装浏览器自动化库——执行 `npm i -g playwright-core` 后**重启 dsh web** 再试；不想安装可改用手动粘贴。 |
+| 点「自动获取」提示缺少 playwright-core | `playwright-core` 未随包装入（通常是历史安装或手动剔除依赖导致）——重新 `pnpm add dsh-ths-holdings`（或 `npm i playwright-core`）后**重启 dsh web** 再试。 |
 | 自动获取弹出窗口后没有反应 | 在弹出窗口完成登录（扫码 / 账号），登录后窗口会自动关闭并保存。 |
 | 弹出窗口显示 `Nginx forbidden` | 同花顺风控偶发拦截——在窗口里 F5 刷新或手动访问登录页重试；登录完成后点「我已登录，继续 →」。 |
 | 保存后徽标显示 `✗ 无效` | 粘贴的 Cookie 已失效或不是投资账本会话——重新登录获取后再试；面板会给出具体原因。 |
@@ -172,7 +170,7 @@ dsh-ths-holdings/
 
 - **账本 API 是未公开的、需登录的端点** — 响应格式可能变化，Cookie 会过期；插件以错误呈现，而不是重试或缓存。
 - **组合列表端点（`account_list`）需要先保存 Cookie** — 粘贴有效 Cookie 后组合选择器才会出现。
-- **自动获取依赖 playwright-core 与系统 Edge** — 未安装或无 Edge 时自动获取不可用（退化为手动粘贴）；卡片会给出明确提示。
+- **自动获取复用系统浏览器** — 依赖随包安装的 playwright-core，自动选择已安装的 Edge / Chrome；机器上两者都没有时自动获取不可用（退化为手动粘贴），卡片会给出明确提示。
 - **无服务端轮询** — 路由按请求拉取，卡片按配置的 `pollMs` 间隔轮询；没有共享缓存或推送通道。
 
 ## License

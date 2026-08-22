@@ -128,6 +128,7 @@ export function StockPnlCard({ onSaveCookie, onSaveFundKey }: StockPnlInjected):
   const [refreshKey, setRefreshKey] = useState(0)
   // Portfolio list and the currently selected fund_key.
   const [portfolios, setPortfolios] = useState<readonly PortfolioInfo[]>([])
+  const [portfoliosLoading, setPortfoliosLoading] = useState(false)
   const [portfolioFundKey, setPortfolioFundKey] = useState(() => localStorage.getItem('stock-pnl-fund-key') ?? '')
   const [portfolioRefreshKey, setPortfolioRefreshKey] = useState(0)
   // Auto-acquire lifecycle: idle/acquiring/saved/failed plus a request guard.
@@ -204,6 +205,7 @@ export function StockPnlCard({ onSaveCookie, onSaveFundKey }: StockPnlInjected):
     if (!editing) return
     void runVerify()
     let disposed = false
+    setPortfoliosLoading(true)
     void (async () => {
       try {
         const resp = await fetch('/api/stock-pnl/portfolios')
@@ -218,7 +220,9 @@ export function StockPnlCard({ onSaveCookie, onSaveFundKey }: StockPnlInjected):
           localStorage.setItem('stock-pnl-fund-key', first.fund_key)
           try { await onSaveFundKey(first.fund_key) } catch { /* ignore */ }
         }
-      } catch { /* ignore */ }
+      } catch { /* ignore */ } finally {
+        if (!disposed) setPortfoliosLoading(false)
+      }
     })()
     return () => { disposed = true }
   }, [editing, portfolioRefreshKey])
@@ -471,7 +475,7 @@ export function StockPnlCard({ onSaveCookie, onSaveFundKey }: StockPnlInjected):
               try { await onSaveFundKey(key) } catch { /* ignore */ }
             }}
           >
-            <option value="">{portfolios.length === 0 ? '加载中...' : '-- 选择组合 --'}</option>
+            <option value="">{portfoliosLoading ? '加载中...' : portfolios.length === 0 ? '暂无组合' : '-- 选择组合 --'}</option>
             {portfolios.map(p => (
               <option key={p.fund_key} value={p.fund_key}>
                 {p.manualname}（{p.brokername}）

@@ -51,16 +51,14 @@ then `cd $DSH_HOME/profiles/web && pnpm install` and restart `dsh web`. The plug
 **Recommended — auto-acquire:**
 
 1. Open the DSH web GUI — click **⚙** on the card.
-2. Click **🖥 自动获取 Cookie（推荐）** — the system Edge browser opens in a visible window.
+2. Click **🖥 自动获取 Cookie（推荐）** — a system browser window opens (Edge / Chrome — the first installed one wins).
 3. Sign in to the Tonghuashun investment ledger in that window (QR code / account).
 4. When the sign-in succeeds the window closes itself, the Cookie is saved automatically, and the card refreshes with your portfolio.
 5. The plugin auto-discovers your portfolio — if you have several, pick one from the dropdown. Done.
 
-> Requires browser automation: install once with `npm i -g playwright-core` (pure JS, no browser download — the system Edge is reused). If it is missing, the card shows the install command and auto-acquire degrades to manual paste.
->
 > The auto-acquired Edge window ships anti-automation camouflage (hides `navigator.webdriver`, disables the AutomationControlled Blink feature) to pass the Tonghuashun WAF. If a specific network/time still shows **Nginx forbidden**, press `F5` in the popped window or open [https://tzzb.10jqka.com.cn](https://tzzb.10jqka.com.cn) manually, then click **「我已登录，继续 →」** on the card; only `10jqka`-domain cookies are kept, never stored as raw plaintext.
 
-**Manual (no install):**
+**Manual (backup):**
 
 1. Open [https://tzzb.10jqka.com.cn](https://tzzb.10jqka.com.cn) and log in.
 2. Press **F12 → Console** and run:
@@ -153,7 +151,7 @@ dsh-ths-holdings/
 |---|---|
 | Card shows `请配置 Cookie` | `STOCK_PNL_COOKIE` is empty — click **auto-acquire** in the ⚙ panel, or paste manually. |
 | Card shows `Token 已过期` | The session Cookie expired — click **auto-acquire** in the ⚙ panel to re-sign-in, or re-run `copy(document.cookie)` and paste. |
-| Auto-acquire reports missing playwright-core | Browser automation is not installed — run `npm i -g playwright-core`, restart `dsh web`, retry; manual paste works without it. |
+| Auto-acquire reports missing playwright-core | `playwright-core` did not ship with the install (typically a legacy install or a manually pruned dependency tree) — re-`pnpm add dsh-ths-holdings` (or `npm i playwright-core`), restart `dsh web`, retry. |
 | Popped window shows `Nginx forbidden` | The Tonghuashun WAF intermittently refuses automation — F5 in the window or open the ledger URL manually, then click **「我已登录，继续 →」**. |
 | No portfolio in the dropdown | The account list needs a valid Cookie first; save the Cookie, then click ↻ to refresh. |
 | Multiple portfolios | Select the one you want from the dropdown — the choice is saved as `STOCK_PNL_FUND_KEY`. |
@@ -171,7 +169,7 @@ None — the plugin contributes no prompt, schema, or result.
 
 - **The ledger API is an undocumented, login-gated endpoint** — its response format can change and the Cookie expires; the plugin surfaces both as errors rather than retrying or caching.
 - **The portfolio list endpoint (`account_list`) requires the Cookie to be saved first** — the portfolio selector appears after you paste a valid Cookie.
-- **Auto-acquire needs playwright-core and the system Edge** — without them auto-acquire is unavailable (manual paste still works); the card says so explicitly.
+- **Auto-acquire reuses a system browser** — it drives the bundled playwright-core dependency against whichever of Edge / Chrome is installed (first found wins); with neither present auto-acquire is unavailable (manual paste still works) and the card says so explicitly.
 - **No server-side polling** — the route fetches on each request and the card polls at the configured `pollMs` interval; there is no shared cache or push channel.
 
 ## License

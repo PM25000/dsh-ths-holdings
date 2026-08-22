@@ -122,7 +122,7 @@ function indexPayload(input: { user_id: string }): string {
  * each break, which corrupts base64/JWT values. Split on `;`, strip whitespace
  * from every `key=value`, and rejoin with the canonical `; ` separator.
  */
-function normalizeCookie(cookie: string): string {
+export function normalizeCookie(cookie: string): string {
   return cookie
     .split(/;\s*/)
     .map(part => part.replace(/\s+/g, ''))
@@ -131,7 +131,7 @@ function normalizeCookie(cookie: string): string {
 }
 
 /** Read one `name=value` field out of a Cookie, or `undefined` when absent. */
-function cookieField(cookie: string, name: string): string | undefined {
+export function cookieField(cookie: string, name: string): string | undefined {
   const match = cookie.match(new RegExp(`(?:^|;\\s*)${name}=([^;]*)`))
   return match?.[1]
 }
@@ -182,16 +182,23 @@ function parsePortfolios(body: { ex_data?: { common?: ReadonlyArray<Record<strin
 /**
  * Query the portfolio list and return every account. Silently returns `[]` on
  * any network or parse failure so the caller can fall back gracefully.
+ * The request shape is byte-identical to verifyCookie's (the same endpoint) —
+ * extra browser headers (Accept/Referer/Accept-Language) or a redirect-follow
+ * get the account_list gateway refused, while this minimal shape is accepted.
+ * The Cookie is normalized first: the credentials store folds long values
+ * across YAML lines and the read inserts a space at each break.
+ * @param fetchImpl - executor override for tests; defaults to the global fetch.
  */
-export async function listPortfolios(cookie: string, user_id: string): Promise<readonly Portfolio[]> {
+export async function listPortfolios(cookie: string, user_id: string, fetchImpl: FetchLike = defaultFetch): Promise<readonly Portfolio[]> {
   const payload = `terminal=1&version=0.0.0&userid=${user_id}&user_id=${user_id}`
   try {
-    const response = await fetch(ACCOUNT_LIST_URL, {
+    const response = await fetchImpl(ACCOUNT_LIST_URL, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': UA, Cookie: cookie },
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': UA, Cookie: normalizeCookie(cookie) },
       body: payload,
+      redirect: 'manual',
     })
-    if (!response.ok) return []
+    if (REDIRECT_STATUSES.has(response.status) || response.status === 401 || response.status === 403 || !response.ok) return []
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const body = (await response.json()) as any
     return parsePortfolios(body)

@@ -36,6 +36,47 @@ export interface PwCookie {
   sameSite?: string
 }
 
+/** The installed-browser channels to try, most preferred first (playwright `channel` option). */
+const BROWSER_CHANNELS = [
+  { channel: 'msedge', label: 'Microsoft Edge' },
+  { channel: 'chrome', label: 'Google Chrome' },
+  { channel: 'msedge-beta', label: 'Microsoft Edge (Beta)' },
+  { channel: 'chrome-beta', label: 'Google Chrome (Beta)' },
+] as const
+
+/**
+ * Launch a visible browser through the first installed channel. Each
+ * `chromium.launch({ channel })` locates the system browser executable and
+ * fails fast when it is missing, so the fallback chain costs little and needs
+ * no bundled browser download.
+ * @param pw - the resolved playwright module.
+ * @returns the launched Browser.
+ * @throws when no known browser channel is installed.
+ */
+export async function launchVisibleBrowser(pw: PwModule): Promise<Browser> {
+  let lastError: unknown = undefined
+  for (const { channel } of BROWSER_CHANNELS) {
+    try {
+      return await pw.chromium.launch({
+        channel,
+        headless: false,
+        // Lower the automation fingerprint: the ledger's WAF refuses plainly
+        // automated contexts ("Nginx forbidden") more reliably than it reads
+        // the real user agent — the standard anti-detection surface, not a
+        // captcha/anti-bot platform.
+        args: ['--disable-blink-features=AutomationControlled'],
+      })
+    } catch (error) {
+      lastError = error
+      // channel not installed — try the next one
+    }
+  }
+  throw new Error(
+    `未检测到已安装的浏览器（已尝试 ${BROWSER_CHANNELS.map(c => c.label).join(' / ')}）`
+    + (lastError instanceof Error ? `：${lastError.message}` : ''),
+  )
+}
+
 /** The ledger host's domain suffix (all 10jqka hosts share the Cookie). */
 const LEDGER_DOMAIN = '10jqka.com.cn'
 /** The session-cookie name marking a completed sign-in (matches fetch.ts's userid derivation). */
@@ -62,14 +103,17 @@ function globalNpmRoot(): string {
 
 /**
  * Resolve the playwright-core module through a chain of anchors.
+ * Since 0.1.6 playwright-core ships as a regular dependency of this plugin,
+ * the plugin's own node_modules is the primary anchor; the web profile and the
+ * global npm root remain as fallbacks for installs that predate the change.
  * @returns the module, or undefined when it is not installed anywhere we look.
  */
 export function resolvePlaywright(): PwModule | undefined {
   const home = process.env.DSH_HOME ?? path.join(os.homedir(), '.dsh')
   const anchors = [
-    path.join(globalNpmRoot(), 'playwright-core', 'package.json'),
-    path.join(home, 'profiles', 'web', 'node_modules', 'playwright-core', 'package.json'),
     path.join(HERE, '..', 'node_modules', 'playwright-core', 'package.json'),
+    path.join(home, 'profiles', 'web', 'node_modules', 'playwright-core', 'package.json'),
+    path.join(globalNpmRoot(), 'playwright-core', 'package.json'),
     'playwright-core/package.json',
   ]
   for (const anchor of anchors) {
@@ -169,15 +213,7 @@ export class CookieAcquirer {
       return this.status()
     }
     try {
-      this.browser = await pw.chromium.launch({
-        channel: 'msedge',
-        headless: false,
-        // Lower the automation fingerprint: the ledger's WAF refuses plainly
-        // automated contexts ("Nginx forbidden") more reliably than it reads the
-        // real user agent — this is the standard anti-detection surface, not a
-        // captcha/anti-bot platform.
-        args: ['--disable-blink-features=AutomationControlled'],
-      })
+      this.browser = await launchVisibleBrowser(pw)
       this.context = await this.browser.newContext({
         locale: 'zh-CN',
         viewport: { width: 1280, height: 800 },
@@ -202,6 +238,7 @@ export class CookieAcquirer {
       await this.closeBrowser()
       this.state = 'failed'
       this.error = `启动浏览器失败: ${error instanceof Error ? error.message : String(error)}`
+      this.hint = '请确认电脑上安装了 Microsoft Edge 或 Google Chrome 后重试；也可改用手动粘贴 Cookie'
     }
     return this.status()
   }

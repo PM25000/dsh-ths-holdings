@@ -22,7 +22,7 @@ import z from '@deepseek-ai/schemastery'
 import WebServer from '@deepseek-ai/dsh-host-webserver'
 import * as uiStockPnl from '../src/index.ts'
 import { CookieAcquirer, cookiesToHeader, isSignedIn, type PwCookie, type PwModule } from '../src/acquire.ts'
-import { collectStats, verifyCookie, type FetchLike } from '../src/fetch.ts'
+import { collectStats, cookieField, listPortfolios, verifyCookie, type FetchLike } from '../src/fetch.ts'
 
 const FIXED_NOW = () => new Date('2026-05-26T06:00:00Z')
 const COOKIE_ENV = 'STOCK_PNL_COOKIE'
@@ -103,6 +103,42 @@ describe('collectStats', () => {
       fetchImpl: async (_url, init) => { expect(init.redirect).toBe('manual'); return new Response(null, { status: 302 }) },
     })
     expect(stats.error).toContain('重定向未跟随')
+  })
+})
+
+describe('cookieField', () => {
+  it('reads the anchored `userid` field even when another cookie embeds a `userid=` substring', () => {
+    // The ledger Cookie can carry a `pex_userid` (or similar) field whose value
+    // ends in `=...`; a bare `/userid=([^;]*)/` regex matches the wrong field
+    // and the account_list gateway answers 403 ("请求失败，请稍后重试"). The
+    // field-boundary regex must win.
+    const cookie = 'pex_userid=el2bijcg9j; userid=825299250; tz=8'
+    expect(cookieField(cookie, 'userid')).toBe('825299250')
+    // Reaffirm the doc'd regression: the naive extraction would be WRONG here.
+    expect(cookie.match(/userid=([^;]*)/)?.[1]).toBe('el2bijcg9j')
+  })
+})
+
+describe('listPortfolios', () => {
+  it('normalizes a line-wrapped cookie and sends the minimal accepted request shape', async () => {
+    // A credential-store read of a long cookie arrives with a space at each
+    // YAML-fold break; the header must be rebuilt before it reaches the API.
+    const wrapped = 'userid=825299250; sid=abc def ghi; tz=8'
+    const seen: Record<string, string | undefined> = {}
+    const list = await listPortfolios(wrapped, '825299250', async (_url, init) => {
+      expect(init.redirect).toBe('manual')
+      const headers = new Headers(init.headers)
+      seen.cookie = headers.get('cookie') ?? ''
+      seen.referer = headers.get('referer') ?? undefined
+      seen.accept = headers.get('accept') ?? undefined
+      return jsonResponse({ error_code: '0', ex_data: { common: [{ fund_key: 'k1', manualname: '组合A', brokername: '华泰' }] } })
+    })
+    // normalizeCookie strips whitespace per `key=value` part and rejoins with '; '.
+    expect(seen.cookie).toBe('userid=825299250; sid=abcdefghi; tz=8')
+    // The minimal shape (no browser-simulation headers) is what the gateway accepts.
+    expect(seen.referer).toBeUndefined()
+    expect(seen.accept).toBeUndefined()
+    expect(list).toEqual([{ fund_key: 'k1', manualname: '组合A', brokername: '华泰' }])
   })
 })
 
@@ -202,7 +238,8 @@ function fakeCookie(name: string, value: string, domain = '.10jqka.com.cn'): PwC
 }
 
 /** A fake playwright module: never opens a window, exposes the state the acquire state machine reads. */
-function fakePlaywright(cookies: PwCookie[]): { module: PwModule; browser: any; setCookies(next: PwCookie[]): void; setClosed(v: boolean): void } {
+function fakePlaywright(cookies: PwCookie[], brokenChannels: string[] = []): { module: PwModule; browser: any; calls: string[]; setCookies(next: PwCookie[]): void; setClosed(v: boolean): void } {
+  const calls: string[] = []
   const browser = {
     closed: false,
     isConnected: () => !browser.closed,
@@ -226,9 +263,10 @@ function fakePlaywright(cookies: PwCookie[]): { module: PwModule; browser: any; 
   const module: PwModule = {
     chromium: {
       async launch(opts?: { channel?: string; headless?: boolean; args?: string[] }) {
-        expect(opts?.channel).toBe('msedge')
         expect(opts?.headless).toBe(false)
         expect(opts?.args).toContain('--disable-blink-features=AutomationControlled')
+        calls.push(opts?.channel ?? '')
+        if (brokenChannels.includes(opts?.channel ?? '')) throw new Error(`no executable for ${opts?.channel}`)
         return browser
       },
     },
@@ -236,6 +274,7 @@ function fakePlaywright(cookies: PwCookie[]): { module: PwModule; browser: any; 
   return {
     module,
     browser,
+    calls,
     setCookies(next) { cookies.splice(0, cookies.length, ...next) },
     setClosed(v) { browser.closed = v },
   }
@@ -269,6 +308,39 @@ describe('acquire helpers', () => {
     expect(st.error).toContain('playwright-core')
     expect(st.hint).toBeTruthy()
     expect(saved).toEqual([])
+    await acq.dispose()
+  })
+
+  it('falls back to Chrome when Edge is not installed', async () => {
+    const saved: string[] = []
+    const fw = fakePlaywright([fakeCookie('sid', 'pre')], ['msedge'])
+    const acq = new CookieAcquirer({
+      save: async v => { saved.push(v) },
+      resolvePlaywright: () => fw.module,
+      pollMs: 5,
+      timeoutMs: 60_000,
+    })
+    expect((await acq.start()).state).toBe('acquiring')
+    // msedge tried and failed, chrome (the second channel) won.
+    expect(fw.calls[0]).toBe('msedge')
+    expect(fw.calls[1]).toBe('chrome')
+    fw.setCookies([fakeCookie('userid', 'u1')])
+    expect((await acq.check()).state).toBe('saved')
+    expect(saved).toEqual(['userid=u1'])
+    await acq.dispose()
+  })
+
+  it('reports an actionable hint when no installed browser is found', async () => {
+    const fw = fakePlaywright([], ['msedge', 'chrome', 'msedge-beta', 'chrome-beta'])
+    const acq = new CookieAcquirer({
+      save: async () => {},
+      resolvePlaywright: () => fw.module,
+      pollMs: 5,
+    })
+    const st = await acq.start()
+    expect(st.state).toBe('failed')
+    expect(st.error).toContain('未检测到已安装的浏览器')
+    expect(st.hint).toContain('Edge')
     await acq.dispose()
   })
 

@@ -12,7 +12,7 @@ import z from '@deepseek-ai/schemastery'
 import { credentialRef } from '@deepseek-ai/dsh-credentials'
 import type { WebRoute } from '@deepseek-ai/dsh-host-webserver'
 import { CookieAcquirer, resolvePlaywright } from './acquire.ts'
-import { collectStats, fetchFundKey, INDEX_URL, listPortfolios, PNL_URL, type Portfolio, verifyCookie } from './fetch.ts'
+import { collectStats, cookieField, fetchFundKey, INDEX_URL, listPortfolios, normalizeCookie, PNL_URL, type Portfolio, verifyCookie } from './fetch.ts'
 import type { Stats } from './types.ts'
 
 export const name = 'ui-stock-pnl'
@@ -114,9 +114,13 @@ export function apply(ctx: Context, config: Config = {}): void {
 
         // Derive the ledger user id (same fallback as collectStats) so we can
         // call the account_list API when fund_key has not yet been stored.
+        // The Cookie is normalized first (the store folds long values across
+        // YAML lines and the read inserts a space at each break) and the field
+        // is read with the anchored cookieField — a bare `/userid=/` regex
+        // would match a different `*_userid=` cookie and get the ledger 403.
         const resolvedUser = spec.user_id.length > 0
           ? spec.user_id
-          : (cookie?.match(/userid=([^;]*)/)?.[1] ?? '')
+          : (cookieField(normalizeCookie(cookie ?? ''), 'userid') ?? '')
 
         // fund_key: credential store → auto-discover from account_list → config default
         const fundKeyCred = await resolveCredential(ctx, spec.fundKeyEnv)
@@ -158,7 +162,7 @@ export function apply(ctx: Context, config: Config = {}): void {
         if (!cookie) { writeJson(res, 200, [] as readonly Portfolio[]); return }
         const user_id = spec.user_id.length > 0
           ? spec.user_id
-          : (cookie.match(/userid=([^;]*)/)?.[1] ?? '')
+          : (cookieField(normalizeCookie(cookie), 'userid') ?? '')
         if (!user_id) { writeJson(res, 200, [] as readonly Portfolio[]); return }
         const list = await listPortfolios(cookie, user_id)
         writeJson(res, 200, list)

@@ -1,7 +1,7 @@
 {
   "name": "dsh-ths-holdings",
   "description": "DSH 持仓盈亏悬浮卡片（同花顺投资账本）— 自动同步真实持仓数据，显示今日盈亏、上证指数和当日走势图，无需手动添加股票。Real portfolio holdings overlay for the DSH web GUI — automatically syncs your positions from the Tonghuashun investment-ledger API.",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "publishConfig": {
     "access": "public"
   },
@@ -56,9 +56,7 @@
     "node": "^22.19.0 || >=24.0.0"
   },
   "dependencies": {
-    "clsx": "^2.0.0"
-  },
-  "optionalDependencies": {
+    "clsx": "^2.0.0",
     "playwright-core": "^1.62.1"
   },
   "peerDependencies": {
@@ -115,7 +113,6 @@
     "@types/node": "^26.2.0",
     "@types/react": "~18.3.1",
     "lightningcss": "^1.25.0",
-    "playwright-core": "^1.62.1",
     "tsdown": "^0.22.0",
     "typescript": "^5.7.0"
   },
