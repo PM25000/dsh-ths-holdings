@@ -118,13 +118,17 @@ jobs:
     if: github.event_name == 'push' || inputs.publish
     needs: pack
     runs-on: ubuntu-24.04
-    environment: npm-publish
+    # NOTE: intentionally no `environment:` mapping here. The job reads the
+    # repo-level NPM_TOKEN secret; an `environment:` mapping would silently
+    # fall back to that environment's own (absent) secret value and the
+    # publish would fail with an unhelpful 401. If you want a protected
+    # release gate, re-add `environment: npm-publish` AND put NPM_TOKEN in
+    # that environment's secrets.
     concurrency:
       group: Release-publish
       cancel-in-progress: false
     permissions:
       contents: read
-      id-token: write    # npm provenance
     steps:
       - uses: actions/setup-node@v6
         with:
@@ -145,6 +149,10 @@ jobs:
         # the first release goes out; re-add --provenance once the npm account
         # links this repository for trusted publishing.
         run: |
+          if [ -z "$NODE_AUTH_TOKEN" ]; then
+            echo "::error::NPM_TOKEN secret is empty. Add it under Settings -> Secrets and variables -> Actions."
+            exit 1
+          fi
           npm whoami
           npm publish ./dist/*.tgz --access public
 
