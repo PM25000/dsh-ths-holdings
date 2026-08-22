@@ -119,16 +119,16 @@ jobs:
     needs: pack
     runs-on: ubuntu-24.04
     # NOTE: intentionally no `environment:` mapping here. The job reads the
-    # repo-level NPM_TOKEN secret; an `environment:` mapping would silently
-    # fall back to that environment's own (absent) secret value and the
-    # publish would fail with an unhelpful 401. If you want a protected
-    # release gate, re-add `environment: npm-publish` AND put NPM_TOKEN in
-    # that environment's secrets.
+    # repo-level NPM_TOKEN secret if present; an `environment:` mapping would
+    # silently fall back to that environment's own (absent) secret value.
+    # Since the npm account now uses trusted publishing (GitHub OIDC), the
+    # publish works with no token at all — NODE_AUTH_TOKEN is only a fallback.
     concurrency:
       group: Release-publish
       cancel-in-progress: false
     permissions:
       contents: read
+      id-token: write    # npm provenance (sigstore OIDC signing)
     steps:
       - uses: actions/setup-node@v6
         with:
@@ -140,21 +140,20 @@ jobs:
           name: npm-tarball
           path: dist
 
-      - name: Publish tarball
+      - name: Publish tarball (provenance)
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        # --provenance (sigstore OIDC) requires npmjs trusted-publishing to be
-        # configured for this repo on the npm account; without it the publish
-        # fails even though the token is valid. Publish without provenance so
-        # the first release goes out; re-add --provenance once the npm account
-        # links this repository for trusted publishing.
+        # --provenance signs the release with sigstore using the GitHub OIDC
+        # id token; the npm account maps this repository via trusted publishing,
+        # so the publish authenticates through OIDC and does not require
+        # NODE_AUTH_TOKEN. The token (when set) remains a compatibility fallback.
         run: |
           if [ -z "$NODE_AUTH_TOKEN" ]; then
-            echo "::error::NPM_TOKEN secret is empty. Add it under Settings -> Secrets and variables -> Actions."
-            exit 1
+            echo "(no NPM_TOKEN secret — using npm trusted publishing / OIDC)"
+          else
+            npm whoami
           fi
-          npm whoami
-          npm publish ./dist/*.tgz --access public
+          npm publish ./dist/*.tgz --provenance --access public
 
   release:
     name: GitHub Release with tarball
