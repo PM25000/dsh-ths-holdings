@@ -26,12 +26,14 @@ async function card(t: TestContext) {
   const stored = new Map([['stock-pnl-fund-key', 'old-fund']])
   const intervals = new Map<number, () => void>()
   const statuses: Promise<AcquireStatusView>[] = []
+  const verifications: Promise<{ configured: boolean; valid: boolean; error?: string }>[] = []
   const calls: string[] = []
   const fundWrites: string[] = []
   let timer = 0
   const host = {
     status: { state: 'idle' } as AcquireStatusView,
     fund: 'old-fund',
+    valid: undefined as boolean | undefined,
     startReply: undefined as Promise<AcquireStatusView> | undefined,
     save: async () => {},
   }
@@ -45,7 +47,7 @@ async function card(t: TestContext) {
         break
       case '/api/stock-pnl/acquire/status': value = statuses.shift() ?? host.status; break
       case '/api/stock-pnl/acquire/cancel': host.status = { state: 'idle' }; value = host.status; break
-      case '/api/stock-pnl/verify': value = { configured: true, valid: host.status.state === 'saved' }; break
+      case '/api/stock-pnl/verify': value = verifications.shift() ?? { configured: true, valid: host.valid ?? host.status.state === 'saved' }; break
       case '/api/stock-pnl/portfolios': value = [{ fund_key: host.fund, manualname: 'test', brokername: 'test' }]; break
       case '/api/stock-pnl': value = { pnl_pct: 0, pnl_yk: 0, sh_pct: 0, chart_data: [], updated_at: '2026-09-23T00:00:00Z', error: '', token_expired: false, poll_ms: 20_000 }; break
       default: assert.fail(`unexpected request: ${url}`)
@@ -76,7 +78,7 @@ async function card(t: TestContext) {
   })
   t.after(async () => { await act(async () => renderer.unmount()) })
   return {
-    host, stored, calls, fundWrites, statuses,
+    host, stored, calls, fundWrites, statuses, verifications,
     text: () => JSON.stringify(renderer.toJSON()),
     toggle: () => act(async () => { renderer.root.findByProps({ 'aria-label': '设置 Cookie' }).props.onClick() }),
     click: (label: string) => act(async () => {
@@ -181,5 +183,58 @@ describe('login completion in the settings card', () => {
     assert.doesNotMatch(h.text(), /已自动获取并保存 Cookie/)
     assert.equal(h.stored.get('stock-pnl-fund-key'), 'old-fund')
     assert.deepEqual(h.fundWrites, [])
+  })
+
+  it('keeps the new login verification when the old panel verification arrives late', async t => {
+    const h = await card(t)
+    const oldVerification = deferred<{ configured: boolean; valid: boolean }>()
+    h.verifications.push(oldVerification.promise)
+    await h.toggle()
+    await h.click('自动获取 Cookie')
+    h.host.status = { state: 'saved' }
+    await h.tick()
+    assert.match(h.text(), /✓ 有效/)
+    await act(async () => { oldVerification.resolve({ configured: true, valid: false }) })
+    assert.match(h.text(), /✓ 有效/)
+    assert.doesNotMatch(h.text(), /✗ 无效/)
+  })
+
+  it('keeps the newest verification within the same login generation', async t => {
+    const h = await card(t)
+    const oldVerification = deferred<{ configured: boolean; valid: boolean }>()
+    h.verifications.push(oldVerification.promise)
+    await h.toggle()
+    await h.toggle()
+    await h.toggle()
+    assert.match(h.text(), /✗ 无效/)
+    await act(async () => { oldVerification.resolve({ configured: true, valid: true }) })
+    assert.match(h.text(), /✗ 无效/)
+    assert.doesNotMatch(h.text(), /✓ 有效/)
+  })
+
+  it('ignores an earlier generation before the new login has requested verification', async t => {
+    const h = await card(t)
+    const oldVerification = deferred<{ configured: boolean; valid: boolean }>()
+    h.verifications.push(oldVerification.promise)
+    await h.toggle()
+    await h.click('自动获取 Cookie')
+    assert.equal(h.calls.filter(url => url.endsWith('/verify')).length, 1)
+    await act(async () => { oldVerification.resolve({ configured: true, valid: false }) })
+    assert.doesNotMatch(h.text(), /✗ 无效/)
+    assert.match(h.text(), /正在登录/)
+  })
+
+  it('keeps the new manual Cookie verification when an older result arrives late', async t => {
+    const h = await card(t)
+    const oldVerification = deferred<{ configured: boolean; valid: boolean }>()
+    h.verifications.push(oldVerification.promise)
+    await h.toggle()
+    await h.draft('userid=manual')
+    h.host.save = async () => { h.host.valid = true }
+    await h.click('保存')
+    assert.match(h.text(), /✓ 有效/)
+    await act(async () => { oldVerification.resolve({ configured: true, valid: false }) })
+    assert.match(h.text(), /✓ 有效/)
+    assert.doesNotMatch(h.text(), /✗ 无效/)
   })
 })

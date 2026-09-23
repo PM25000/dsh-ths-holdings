@@ -132,6 +132,8 @@ export function StockPnlCard({ onSaveCookie, onSaveFundKey }: StockPnlInjected):
   const [acqBusy, setAcqBusy] = useState(false)
   // Verify badge: whether the stored Cookie is accepted by the ledger.
   const [verify, setVerify] = useState<VerifyView | null>(null)
+  const verifyRequest = useRef(0)
+  const mounted = useRef(false)
   // Show the yuan amount (yk) instead of percentage when toggled.
   const [showAmount, setShowAmount] = useState(() => localStorage.getItem('stock-pnl-show-amount') === 'true')
   // Vertical position of the card's top edge, in viewport pixels; `null` keeps
@@ -169,6 +171,11 @@ export function StockPnlCard({ onSaveCookie, onSaveFundKey }: StockPnlInjected):
 
   /** The inline style that pins the card to a dragged `top`; `undefined` uses the CSS default. */
   const cardStyle = top === null ? undefined : { top: `${top}px`, bottom: 'auto' }
+
+  useEffect(() => {
+    mounted.current = true
+    return () => { mounted.current = false; ++verifyRequest.current }
+  }, [])
 
   useEffect(() => {
     let disposed = false
@@ -235,12 +242,16 @@ export function StockPnlCard({ onSaveCookie, onSaveFundKey }: StockPnlInjected):
 
   /** Ask the host whether the stored Cookie is accepted by the ledger. */
   const runVerify = async (): Promise<void> => {
+    if (!mounted.current) return
+    const request = ++verifyRequest.current
+    const generation = acquireGeneration.current
     try {
       const resp = await fetch('/api/stock-pnl/verify')
       if (!resp.ok) return
       const view = (await resp.json()) as VerifyView
-      setVerify(view)
-    } catch { /* badge stays unknown */ }
+      // Both the request order and Cookie lifecycle must still match after reading the body.
+      if (mounted.current && request === verifyRequest.current && generation === acquireGeneration.current) setVerify(view)
+    } catch { /* keep the last accepted result until a current request succeeds */ }
   }
 
   /** Ignore responses from requests preceding a new login, cancellation, or manual save. */
