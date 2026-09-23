@@ -44,6 +44,10 @@ try {
   assert.ok(Math.abs(pageSignals.heightGap) < 200, 'No emulated viewport height mismatch')
   console.log(JSON.stringify({ cookieRead: found, pageSignals }))
 } finally {
-  await browser?.close()
-  await new Promise<void>(resolve => server.close(() => resolve()))
+  try {
+    await browser?.close()
+    if (browser) assert.equal(browser.cleanupPending, false, 'The temporary profile is removed after exit')
+  } finally {
+    await new Promise<void>(resolve => server.close(() => resolve()))
+  }
 }

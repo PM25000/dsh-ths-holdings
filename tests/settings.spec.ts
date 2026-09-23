@@ -10,13 +10,14 @@ import { saveSetting } from '../src/client/settings.ts'
 const cleanup: Array<() => Promise<void>> = []
 afterEach(async () => { for (const close of cleanup.splice(0)) await close() })
 
-async function host(fail = false) {
+async function host(fail = false, beforeSave?: () => Promise<void>) {
   const values = new Map<string, string>()
   const routes = new Map<string, WebRoute>()
   const disposers: Array<() => void | Promise<void>> = []
   apply({
     credentials: {
       set: async (ref: string, value: string) => {
+        await beforeSave?.()
         if (fail) throw new Error(`refused secret: ${value}`)
         values.set(ref, value)
       },
@@ -68,6 +69,36 @@ describe('settings host routes', () => {
     assert.equal(response.status, 500)
     assert.ok(!(await response.text()).includes('private-test'))
     assert.equal(h.values.size, 0)
+  })
+
+  it('rejects normalized-empty cookies without replacing the existing credential', async () => {
+    const h = await host()
+    const url = `${h.url}/api/stock-pnl/cookie`
+    assert.equal((await fetch(url, json('userid=existing'))).status, 200)
+    for (const value of [';;;', ' ; \n ; \t ; ', null, 123]) {
+      assert.equal((await fetch(url, json(value))).status, 400)
+      assert.equal(h.values.get('CUSTOM_COOKIE'), 'userid=existing')
+    }
+  })
+
+  it('rejects overlapping HTTP writes and exposes only pending status', async () => {
+    let release!: () => void
+    let started!: () => void
+    const pending = new Promise<void>(resolve => { release = resolve })
+    const writing = new Promise<void>(resolve => { started = resolve })
+    const h = await host(false, () => { started(); return pending })
+    const url = `${h.url}/api/stock-pnl/cookie`
+    const first = fetch(url, json('userid=old'))
+    await writing
+    try {
+      assert.equal((await fetch(url, json('userid=new'))).status, 409)
+      const status = await (await fetch(`${h.url}/api/stock-pnl/acquire/status`)).json() as { pending_save?: boolean }
+      assert.equal(status.pending_save, true)
+      assert.ok(!JSON.stringify(status).includes('userid='))
+    } finally { release() }
+    assert.equal((await first).status, 200)
+    assert.equal((await fetch(url, json('userid=new'))).status, 200)
+    assert.equal(h.values.get('CUSTOM_COOKIE'), 'userid=new')
   })
 
   it('saves from the client without any connection.api and propagates server failures', async () => {

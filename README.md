@@ -58,6 +58,8 @@ then `cd $DSH_HOME/profiles/web && pnpm install` and restart `dsh web`. The plug
 
 > Auto-acquire uses a temporary browser profile and reads cookies through browser-level commands. It does not attach a page debugger, inject scripts, or emulate viewport dimensions. Only cookies for `10jqka.com.cn` and its subdomains are saved; the temporary profile is deleted after the browser exits. You do not need to open developer tools during sign-in.
 
+If closing the window times out, profile cleanup continues when the browser actually exits. Cleanup failures remain visible in settings with a retry button. Cookie saves wait up to 30 seconds; a timeout or cancellation closes the login window, but an already submitted storage operation may still complete. The card shows that the result is unconfirmed and blocks additional saves until that operation settles, preventing an older request from overwriting a newer Cookie.
+
 **Manual (backup):**
 
 1. Open [https://tzzb.10jqka.com.cn](https://tzzb.10jqka.com.cn) and log in.

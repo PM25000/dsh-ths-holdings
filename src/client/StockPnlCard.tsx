@@ -11,6 +11,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import clsx from 'clsx'
 import css from './stock-pnl.module.css'
+import type { AcquireStatusView as AcquireStatus } from '../types.ts'
 
 /** The `/api/stock-pnl` payload subset the card renders. */
 interface Snapshot {
@@ -22,13 +23,6 @@ interface Snapshot {
   error: string
   token_expired: boolean
   poll_ms: number
-}
-
-/** The `/api/stock-pnl/acquire*` payload subset the card renders. */
-interface AcquireStatus {
-  state: 'idle' | 'acquiring' | 'saved' | 'failed'
-  error?: string
-  hint?: string
 }
 
 /** The `/api/stock-pnl/verify` payload subset the card renders. */
@@ -133,6 +127,7 @@ export function StockPnlCard({ onSaveCookie, onSaveFundKey }: StockPnlInjected):
   const [portfolioRefreshKey, setPortfolioRefreshKey] = useState(0)
   // Auto-acquire lifecycle: idle/acquiring/saved/failed plus a request guard.
   const [acq, setAcq] = useState<AcquireStatus | null>(null)
+  const completedAcquire = useRef(false)
   const [acqBusy, setAcqBusy] = useState(false)
   // Verify badge: whether the stored Cookie is accepted by the ledger.
   const [verify, setVerify] = useState<VerifyView | null>(null)
@@ -205,6 +200,12 @@ export function StockPnlCard({ onSaveCookie, onSaveFundKey }: StockPnlInjected):
     if (!editing) return
     void runVerify()
     let disposed = false
+    void fetch('/api/stock-pnl/acquire/status').then(async resp => {
+      if (!resp.ok) return
+      const status = (await resp.json()) as AcquireStatus
+      // An opening-panel request must not overwrite a login started in the meantime.
+      if (!disposed) setAcq(current => current === acq ? status : current)
+    }).catch(() => {})
     setPortfoliosLoading(true)
     void (async () => {
       try {
@@ -242,8 +243,9 @@ export function StockPnlCard({ onSaveCookie, onSaveFundKey }: StockPnlInjected):
 
   /** Fold one acquire-status answer into the card; a saved run completes the flow. */
   const applyAcquireStatus = (st: AcquireStatus): void => {
-    setAcq({ state: st.state, error: st.error, hint: st.hint })
-    if (st.state !== 'saved') return
+    setAcq(st)
+    if (st.state !== 'saved' || completedAcquire.current) return
+    completedAcquire.current = true
     // The Cookie changed — clear the stored fund_key so the next portfolio
     // load auto-selects the first account of the fresh session.
     setSaved(true)
@@ -258,6 +260,7 @@ export function StockPnlCard({ onSaveCookie, onSaveFundKey }: StockPnlInjected):
   /** Start the auto-acquire flow: the host opens a visible Edge window. */
   const startAcquire = async (): Promise<void> => {
     if (acqBusy) return
+    completedAcquire.current = false
     setAcqBusy(true)
     setSaved(false)
     setSaveError(null)
@@ -288,15 +291,16 @@ export function StockPnlCard({ onSaveCookie, onSaveFundKey }: StockPnlInjected):
       if (!resp.ok) return
       setAcq((await resp.json()) as AcquireStatus)
     } catch {
-      setAcq({ state: 'idle' })
+      setSaveError('未能确认登录窗口清理结果，请稍后重试')
     }
   }
 
-  // While a sign-in is in progress, poll the host status every second; the
-  // host closes the window itself once the Cookie is committed.
+  // Keep pending saves and late profile cleanup visible after the login flow ends.
   const acquiring = acq?.state === 'acquiring'
+  const pendingSave = acq?.pending_save === true
+  const needsAcquirePoll = acquiring || pendingSave || acq?.cleanup_pending === true
   useEffect(() => {
-    if (!acquiring) return
+    if (!needsAcquirePoll) return
     let disposed = false
     const timer = window.setInterval(() => {
       void (async () => {
@@ -311,7 +315,7 @@ export function StockPnlCard({ onSaveCookie, onSaveFundKey }: StockPnlInjected):
       disposed = true
       window.clearInterval(timer)
     }
-  }, [acquiring])
+  }, [needsAcquirePoll])
 
   const pnl = snapshot?.pnl_pct ?? 0
   const yk = snapshot?.pnl_yk ?? 0
@@ -337,6 +341,10 @@ export function StockPnlCard({ onSaveCookie, onSaveFundKey }: StockPnlInjected):
       await runVerify()
     } catch (error) {
       setSaveError(error instanceof Error ? error.message : String(error))
+      try {
+        const resp = await fetch('/api/stock-pnl/acquire/status')
+        if (resp.ok) setAcq((await resp.json()) as AcquireStatus)
+      } catch { /* preserve the save error until status can be refreshed */ }
     } finally {
       setSaving(false)
     }
@@ -414,7 +422,7 @@ export function StockPnlCard({ onSaveCookie, onSaveFundKey }: StockPnlInjected):
 
           {(acq === null || acq.state === 'idle') ? (
             <div className={css.acqRow}>
-              <button type="button" className={css.autoBtn} onClick={() => { void startAcquire() }} disabled={acqBusy}>
+              <button type="button" className={css.autoBtn} onClick={() => { void startAcquire() }} disabled={acqBusy || pendingSave}>
                 {acqBusy ? '启动浏览器…' : '🖥 自动获取 Cookie（推荐）'}
               </button>
               <span className={css.acqTip}>弹出浏览器窗口，扫码登录后自动保存</span>
@@ -435,8 +443,13 @@ export function StockPnlCard({ onSaveCookie, onSaveFundKey }: StockPnlInjected):
             <div className={css.acqPanel}>
               <div className={css.error}>{acq.error ?? '自动获取失败'}</div>
               {acq.hint !== undefined && acq.hint.length > 0 && <div className={css.acqTip}>{acq.hint}</div>}
-              <button type="button" className={css.autoBtn} onClick={() => { void startAcquire() }} disabled={acqBusy}>重试</button>
+              <button type="button" className={css.autoBtn} onClick={() => { void startAcquire() }} disabled={acqBusy || pendingSave}>重试</button>
             </div>
+          )}
+
+          {acq?.warning && <div className={css.error} role="status">{acq.warning}</div>}
+          {acq?.cleanup_pending && (
+            <button type="button" className={css.ghostBtn} onClick={() => { void cancelAcquire() }}>重试清理</button>
           )}
 
           <div className={css.manualHint}>
@@ -496,7 +509,7 @@ export function StockPnlCard({ onSaveCookie, onSaveFundKey }: StockPnlInjected):
             显示金额（¥）
           </label>
           <div className={css.settingsActions}>
-            <button type="button" className={css.saveBtn} onClick={() => { void save() }} disabled={saving || draft.trim().length === 0}>
+            <button type="button" className={css.saveBtn} onClick={() => { void save() }} disabled={saving || pendingSave || acquiring || draft.trim().length === 0}>
               保存
             </button>
             <button type="button" className={css.cancelBtn} onClick={() => { setEditing(false) }} disabled={saving}>

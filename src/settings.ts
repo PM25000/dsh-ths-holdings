@@ -2,9 +2,10 @@ import type { Context } from '@deepseek-ai/cordis'
 import { credentialRef } from '@deepseek-ai/dsh-credentials'
 import type { WebRoute } from '@deepseek-ai/dsh-host-webserver'
 import { normalizeCookie } from './fetch.ts'
+import { CredentialWriteError } from './credential-writer.ts'
 
 /** Small write-only endpoint; the client cannot choose an arbitrary credential reference. */
-export function settingHandler(ctx: Context, ref: string, cookie: boolean): WebRoute['handler'] {
+export function settingHandler(ctx: Context, ref: string, cookie: boolean, save?: (value: string) => Promise<void>): WebRoute['handler'] {
   return async (req, res) => {
     const reply = (status: number, error?: string): void => {
       res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' })
@@ -44,14 +45,20 @@ export function settingHandler(ctx: Context, ref: string, cookie: boolean): WebR
       reply(400, '设置格式无效')
       return
     }
-    if (typeof value !== 'string' || value.trim().length === 0) {
+    const normalized = typeof value === 'string' ? (cookie ? normalizeCookie(value) : value.trim()) : ''
+    if (normalized.length === 0) {
       reply(400, '设置不能为空')
       return
     }
     try {
-      await ctx.credentials.set(credentialRef(ref), cookie ? normalizeCookie(value) : value.trim())
+      if (save) await save(normalized)
+      else await ctx.credentials.set(credentialRef(ref), normalized)
       reply(200)
-    } catch {
+    } catch (error) {
+      if (error instanceof CredentialWriteError) {
+        reply(error.code === 'busy' ? 409 : error.code === 'timeout' ? 504 : 500, error.message)
+        return
+      }
       // Provider errors may contain the submitted secret; never echo or log them.
       reply(500, '保存凭据失败，请检查 DSH 凭据存储是否可写')
     }

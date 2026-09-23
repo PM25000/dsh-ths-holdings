@@ -56,6 +56,10 @@ export interface AcquireStatusView {
   readonly state: 'idle' | 'acquiring' | 'saved' | 'failed'
   /** Human-readable failure message (failed only). */
   readonly error?: string
-  /** Actionable hint for the failure (e.g. how to install playwright-core). */
+  /** Actionable hint for the current login flow. */
   readonly hint?: string
+  /** Outstanding work can remain after success, cancellation, or failure. */
+  readonly warning?: string
+  readonly cleanup_pending?: boolean
+  readonly pending_save?: boolean
 }

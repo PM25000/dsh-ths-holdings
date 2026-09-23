@@ -191,7 +191,7 @@ export function apply(ctx: Context, config: Config = {}): void {
   })
   ctx.effect(() => async () => { await acquirer.dispose() }, 'ui-stock-pnl: acquire teardown')
 
-  addRoute('/api/stock-pnl/cookie', settingHandler(ctx, spec.cookieEnv, true))
+  addRoute('/api/stock-pnl/cookie', settingHandler(ctx, spec.cookieEnv, true, value => acquirer.saveCookie(value)))
   addRoute('/api/stock-pnl/fund-key', settingHandler(ctx, spec.fundKeyEnv, false))
 
   // Verify: probe the ledger with the stored Cookie and report whether it works.

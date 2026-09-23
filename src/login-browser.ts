@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { StringDecoder } from 'node:string_decoder'
 import type { Readable, Writable } from 'node:stream'
+import { BrowserCleanup } from './browser-cleanup.ts'
 
 export interface LoginCookie {
   name: string
@@ -14,9 +15,15 @@ export interface LoginCookie {
 }
 
 export interface LoginBrowser {
+  readonly cleanupPending?: boolean
   cookies(): Promise<readonly LoginCookie[]>
   isClosed(): Promise<boolean>
   close(): Promise<void>
+}
+
+/** A failed launch can still own a browser/profile that needs another cleanup attempt. */
+export class LoginBrowserLaunchError extends Error {
+  constructor(readonly browser: LoginBrowser) { super('登录浏览器启动失败且清理尚未完成') }
 }
 
 interface Pending {
@@ -104,7 +111,10 @@ export async function launchLoginBrowser(url: string): Promise<LoginBrowser> {
   for (const executable of browserCandidates()) {
     try { await access(executable) } catch { continue }
     installed = true
-    try { return await launchExecutable(executable, url) } catch { /* try the next installed browser */ }
+    try { return await launchExecutable(executable, url) } catch (error) {
+      if (error instanceof LoginBrowserLaunchError) throw error
+      // Try the next browser only after the failed launch has been cleaned up.
+    }
   }
   if (installed) throw new Error('无法启动登录浏览器，请检查浏览器是否被系统策略阻止')
   throw new Error('未检测到已安装的浏览器，请安装 Microsoft Edge 或 Google Chrome')
@@ -122,43 +132,34 @@ async function launchExecutable(executable: string, url: string): Promise<LoginB
   const exit = new Promise<void>(resolve => {
     const done = (): void => { exited = true; pipe.dispose(); resolve() }
     child.once('exit', done)
-    child.once('error', done)
+    child.on('error', () => {
+      // A failed kill also emits error; it does not mean an existing process exited.
+      if (child.pid === undefined) done()
+    })
   })
-  let closing: Promise<void> | undefined
-  const close = (): Promise<void> => closing ??= (async () => {
-    if (!exited) {
-      const killer = setTimeout(() => { child.kill() }, 2_000)
-      let deadline: ReturnType<typeof setTimeout> | undefined
-      try {
-        await Promise.race([
-          (async () => { await pipe.send('Browser.close').catch(() => {}); await exit })(),
-          new Promise<never>((_resolve, reject) => {
-            deadline = setTimeout(() => reject(new Error('登录窗口关闭超时')), 5_000)
-          }),
-        ])
-      } finally {
-        clearTimeout(killer)
-        clearTimeout(deadline)
-        pipe.dispose()
-      }
-    }
-    pipe.dispose()
+  const cleanup = new BrowserCleanup({
+    exit,
+    requestClose: () => pipe.send('Browser.close'),
+    kill: () => { child.kill() },
+    dispose: () => pipe.dispose(),
     // Only remove the fresh directory created above, after its browser exits.
-    await rm(profile, { recursive: true, force: true, maxRetries: 8, retryDelay: 250 })
-  })()
+    removeProfile: () => rm(profile, { recursive: true, force: true, maxRetries: 8, retryDelay: 250 }),
+  })
+  const browser: LoginBrowser = {
+    get cleanupPending() { return cleanup.pending },
+    cookies: async () => (await pipe.send<{ cookies: LoginCookie[] }>('Storage.getCookies')).cookies,
+    isClosed: async () => {
+      if (exited) return true
+      const { targetInfos } = await pipe.send<{ targetInfos: { type: string }[] }>('Target.getTargets')
+      return !targetInfos.some(target => target.type === 'page')
+    },
+    close: () => cleanup.close(),
+  }
   try {
     await pipe.send('Target.createTarget', { url, newWindow: true })
-    return {
-      cookies: async () => (await pipe.send<{ cookies: LoginCookie[] }>('Storage.getCookies')).cookies,
-      isClosed: async () => {
-        if (exited) return true
-        const { targetInfos } = await pipe.send<{ targetInfos: { type: string }[] }>('Target.getTargets')
-        return !targetInfos.some(target => target.type === 'page')
-      },
-      close,
-    }
+    return browser
   } catch (error) {
-    await close()
+    try { await browser.close() } catch { throw new LoginBrowserLaunchError(browser) }
     throw error
   }
 }
