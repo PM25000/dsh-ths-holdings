@@ -128,6 +128,7 @@ export function StockPnlCard({ onSaveCookie, onSaveFundKey }: StockPnlInjected):
   // Auto-acquire lifecycle: idle/acquiring/saved/failed plus a request guard.
   const [acq, setAcq] = useState<AcquireStatus | null>(null)
   const completedAcquire = useRef(false)
+  const acquireGeneration = useRef(0)
   const [acqBusy, setAcqBusy] = useState(false)
   // Verify badge: whether the stored Cookie is accepted by the ledger.
   const [verify, setVerify] = useState<VerifyView | null>(null)
@@ -200,11 +201,12 @@ export function StockPnlCard({ onSaveCookie, onSaveFundKey }: StockPnlInjected):
     if (!editing) return
     void runVerify()
     let disposed = false
+    const generation = acquireGeneration.current
     void fetch('/api/stock-pnl/acquire/status').then(async resp => {
       if (!resp.ok) return
       const status = (await resp.json()) as AcquireStatus
       // An opening-panel request must not overwrite a login started in the meantime.
-      if (!disposed) setAcq(current => current === acq ? status : current)
+      if (!disposed) setAcq(current => generation === acquireGeneration.current && current === acq ? status : current)
     }).catch(() => {})
     setPortfoliosLoading(true)
     void (async () => {
@@ -241,10 +243,15 @@ export function StockPnlCard({ onSaveCookie, onSaveFundKey }: StockPnlInjected):
     } catch { /* badge stays unknown */ }
   }
 
-  /** Fold one acquire-status answer into the card; a saved run completes the flow. */
-  const applyAcquireStatus = (st: AcquireStatus): void => {
-    setAcq(st)
-    if (st.state !== 'saved' || completedAcquire.current) return
+  /** Ignore responses from requests preceding a new login, cancellation, or manual save. */
+  const applyAcquireStatus = (st: AcquireStatus, generation: number): void => {
+    if (generation === acquireGeneration.current) setAcq(st)
+  }
+
+  // Every accepted saved state completes the flow, including panel refresh and error recovery.
+  // Keep side effects outside state updaters, which React may evaluate more than once.
+  useEffect(() => {
+    if (acq?.state !== 'saved' || completedAcquire.current) return
     completedAcquire.current = true
     // The Cookie changed — clear the stored fund_key so the next portfolio
     // load auto-selects the first account of the fresh session.
@@ -255,11 +262,12 @@ export function StockPnlCard({ onSaveCookie, onSaveFundKey }: StockPnlInjected):
     setPortfolioRefreshKey(k => k + 1)
     setRefreshKey(k => k + 1)
     void runVerify()
-  }
+  }, [acq])
 
   /** Start the auto-acquire flow: the host opens a visible Edge window. */
   const startAcquire = async (): Promise<void> => {
     if (acqBusy || saving || pendingSave) return
+    const generation = ++acquireGeneration.current
     completedAcquire.current = false
     setAcqBusy(true)
     setSaved(false)
@@ -267,31 +275,34 @@ export function StockPnlCard({ onSaveCookie, onSaveFundKey }: StockPnlInjected):
     try {
       const resp = await fetch('/api/stock-pnl/acquire')
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
-      applyAcquireStatus((await resp.json()) as AcquireStatus)
+      applyAcquireStatus((await resp.json()) as AcquireStatus, generation)
     } catch (error) {
-      setAcq({ state: 'failed', error: error instanceof Error ? error.message : String(error) })
+      applyAcquireStatus({ state: 'failed', error: error instanceof Error ? error.message : String(error) }, generation)
     } finally {
-      setAcqBusy(false)
+      if (generation === acquireGeneration.current) setAcqBusy(false)
     }
   }
 
   /** The "我已登录" button: run one immediate sign-in probe. */
   const continueAcquire = async (): Promise<void> => {
+    const generation = acquireGeneration.current
     try {
       const resp = await fetch('/api/stock-pnl/acquire/check')
       if (!resp.ok) return
-      applyAcquireStatus((await resp.json()) as AcquireStatus)
+      applyAcquireStatus((await resp.json()) as AcquireStatus, generation)
     } catch { /* the poll loop surfaces the failure */ }
   }
 
   /** Abandon the auto-acquire flow and close the window. */
   const cancelAcquire = async (): Promise<void> => {
+    const generation = ++acquireGeneration.current
+    setAcqBusy(false)
     try {
       const resp = await fetch('/api/stock-pnl/acquire/cancel')
       if (!resp.ok) return
-      setAcq((await resp.json()) as AcquireStatus)
+      applyAcquireStatus((await resp.json()) as AcquireStatus, generation)
     } catch {
-      setSaveError('未能确认登录窗口清理结果，请稍后重试')
+      if (generation === acquireGeneration.current) setSaveError('未能确认登录窗口清理结果，请稍后重试')
     }
   }
 
@@ -304,10 +315,12 @@ export function StockPnlCard({ onSaveCookie, onSaveFundKey }: StockPnlInjected):
     let disposed = false
     const timer = window.setInterval(() => {
       void (async () => {
+        const generation = acquireGeneration.current
         try {
           const resp = await fetch('/api/stock-pnl/acquire/status')
-          if (disposed || !resp.ok) return
-          applyAcquireStatus((await resp.json()) as AcquireStatus)
+          if (!resp.ok) return
+          const status = (await resp.json()) as AcquireStatus
+          if (!disposed) applyAcquireStatus(status, generation)
         } catch { /* transient; next tick */ }
       })()
     }, 1000)
@@ -324,6 +337,7 @@ export function StockPnlCard({ onSaveCookie, onSaveFundKey }: StockPnlInjected):
 
   const save = async (): Promise<void> => {
     if (saving || acqBusy || acquiring || pendingSave) return
+    const generation = ++acquireGeneration.current
     setSaving(true)
     setSaveError(null)
     setSaved(false)
@@ -344,7 +358,7 @@ export function StockPnlCard({ onSaveCookie, onSaveFundKey }: StockPnlInjected):
       setSaveError(error instanceof Error ? error.message : String(error))
       try {
         const resp = await fetch('/api/stock-pnl/acquire/status')
-        if (resp.ok) setAcq((await resp.json()) as AcquireStatus)
+        if (resp.ok) applyAcquireStatus((await resp.json()) as AcquireStatus, generation)
       } catch { /* preserve the save error until status can be refreshed */ }
     } finally {
       setSaving(false)
