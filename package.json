@@ -119,6 +119,7 @@
     "@types/node": "^26.2.0",
     "@types/react": "~18.3.1",
     "lightningcss": "^1.25.0",
+    "react-test-renderer": "18.3.1",
     "tsdown": "^0.22.0",
     "typescript": "^5.7.0"
   },

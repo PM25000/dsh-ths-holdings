@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import { PassThrough } from 'node:stream'
+import { setImmediate as nextTurn } from 'node:timers/promises'
 import { CookieAcquirer, cookiesToHeader, isSignedIn } from '../src/acquire.ts'
-import { BrowserPipe, type LoginCookie, type LoginBrowser } from '../src/login-browser.ts'
+import { BrowserPipe, LoginBrowserLaunchError, type LoginCookie, type LoginBrowser } from '../src/login-browser.ts'
 
 const cookie = (name: string, value: string, domain = '.10jqka.com.cn'): LoginCookie => ({ name, value, domain, path: '/' })
 function fixture() {
@@ -118,6 +119,155 @@ describe('human login acquisition', () => {
     assert.equal(result.state, 'failed')
     assert.match(result.hint!, /Edge.*Chrome/)
     await acquirer.dispose()
+  })
+
+  it('times out a stuck save, closes the browser, and prevents manual or automatic overwrite', async t => {
+    const f = fixture()
+    f.setCookies([cookie('userid', 'old')])
+    const pending = deferred<void>()
+    const values: string[] = []
+    let launches = 0
+    const acquirer = new CookieAcquirer({
+      launchBrowser: async () => { launches++; return f.browser },
+      save: async value => { await pending.promise; values.push(value) }, saveTimeoutMs: 10,
+    })
+    t.after(() => acquirer.dispose())
+    await acquirer.start()
+    const result = await acquirer.check()
+    assert.equal(result.state, 'failed')
+    assert.equal(result.pending_save, true)
+    assert.match(result.error!, /超时/)
+    assert.equal(f.closed(), true)
+    await assert.rejects(acquirer.saveCookie('userid=new'), /仍在处理中/)
+    await acquirer.start()
+    assert.equal(launches, 1)
+    pending.resolve()
+    await nextTurn()
+    assert.equal(acquirer.status().pending_save, undefined)
+    assert.equal(acquirer.status().state, 'failed')
+    await acquirer.saveCookie('userid=new')
+    assert.deepEqual(values, ['userid=old', 'userid=new'])
+  })
+
+  it('cancels and disposes without waiting for an unabortable credential write', { timeout: 1000 }, async () => {
+    const f = fixture()
+    f.setCookies([cookie('userid', 'old')])
+    const pending = deferred<void>()
+    const writing = deferred<void>()
+    const acquirer = new CookieAcquirer({ launchBrowser: async () => f.browser,
+      save: () => { writing.resolve(); return pending.promise },
+    })
+    await acquirer.start()
+    const checking = acquirer.check()
+    await writing.promise
+    const cancelled = await acquirer.cancel()
+    await checking
+    await acquirer.dispose()
+    assert.equal(cancelled.state, 'idle')
+    assert.equal(cancelled.pending_save, true)
+    assert.equal(f.closed(), true)
+    pending.resolve()
+    await nextTurn()
+    assert.equal(acquirer.status().state, 'idle')
+    assert.equal(acquirer.status().pending_save, undefined)
+  })
+
+  it('keeps cleanup failures visible after success and cancellation and supports retry', async () => {
+    const f = fixture()
+    f.setCookies([cookie('userid', '1')])
+    let failCleanup = true
+    f.browser.close = async () => { if (failCleanup) throw new Error('locked') }
+    const acquirer = new CookieAcquirer({ launchBrowser: async () => f.browser, save: async () => {} })
+    await acquirer.start()
+    assert.equal((await acquirer.check()).state, 'saved')
+    assert.equal(acquirer.status().cleanup_pending, true)
+    const cancelled = await acquirer.cancel()
+    assert.equal(cancelled.state, 'idle')
+    assert.match(cancelled.warning!, /临时登录数据/)
+    failCleanup = false
+    assert.equal((await acquirer.cancel()).cleanup_pending, undefined)
+    assert.equal(acquirer.status().warning, undefined)
+  })
+
+  it('retains cleanup ownership after a failed launch and notices late cleanup success', async () => {
+    const f = fixture()
+    let pending = true
+    Object.defineProperty(f.browser, 'cleanupPending', { get: () => pending })
+    f.browser.close = async () => { if (pending) throw new Error('not exited') }
+    const acquirer = new CookieAcquirer({
+      launchBrowser: async () => { throw new LoginBrowserLaunchError(f.browser) }, save: async () => {},
+    })
+    assert.equal((await acquirer.start()).cleanup_pending, true)
+    assert.equal((await acquirer.cancel()).cleanup_pending, true)
+    pending = false
+    assert.equal(acquirer.status().cleanup_pending, undefined)
+    assert.equal(acquirer.status().warning, undefined)
+    await acquirer.dispose()
+  })
+
+  it('does not open another browser while cleanup of the previous one keeps failing', async () => {
+    const f = fixture()
+    let failCleanup = true
+    let launches = 0
+    f.browser.close = async () => { if (failCleanup) throw new Error('locked') }
+    const acquirer = new CookieAcquirer({ launchBrowser: async () => { launches++; return f.browser }, save: async () => {} })
+    await acquirer.start()
+    await acquirer.cancel()
+    assert.equal((await acquirer.start()).cleanup_pending, true)
+    assert.equal(launches, 1)
+    failCleanup = false
+    assert.equal((await acquirer.start()).state, 'acquiring')
+    assert.equal(launches, 2)
+    await acquirer.dispose()
+  })
+
+  it('rejects manual saves throughout browser startup and login, then allows them after cancellation', async () => {
+    const f = fixture()
+    const launch = deferred<LoginBrowser>()
+    const values: string[] = []
+    const acquirer = new CookieAcquirer({ launchBrowser: () => launch.promise, save: async value => { values.push(value) } })
+    const starting = acquirer.start()
+    try {
+      await assert.rejects(acquirer.saveCookie('userid=manual'), /自动登录/)
+      launch.resolve(f.browser)
+      await starting
+      await assert.rejects(acquirer.saveCookie('userid=manual'), /自动登录/)
+      assert.deepEqual(values, [])
+      await acquirer.cancel()
+      await acquirer.saveCookie('userid=manual')
+      assert.deepEqual(values, ['userid=manual'])
+    } finally {
+      launch.resolve(f.browser)
+      await acquirer.dispose()
+    }
+  })
+
+  it('does not launch automatic login while a manual save is in flight', async () => {
+    const pending = deferred<void>()
+    const acquirer = new CookieAcquirer({
+      save: () => pending.promise,
+      launchBrowser: async () => assert.fail('manual write must prevent launch'),
+    })
+    const writing = acquirer.saveCookie('userid=manual')
+    try {
+      const result = await acquirer.start()
+      assert.equal(result.state, 'idle')
+      assert.equal(result.pending_save, true)
+    } finally {
+      pending.resolve()
+      await writing
+      await acquirer.dispose()
+    }
+  })
+
+  it('refuses new saves and launches through an instance that has been disposed', async () => {
+    const acquirer = new CookieAcquirer({
+      save: async () => assert.fail('disposed instance must not save'),
+      launchBrowser: async () => assert.fail('disposed instance must not launch'),
+    })
+    await acquirer.dispose()
+    await assert.rejects(acquirer.saveCookie('userid=late-request'), /重新加载/)
+    assert.match((await acquirer.start()).error!, /重新加载/)
   })
 })
 

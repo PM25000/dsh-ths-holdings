@@ -185,13 +185,14 @@ export function apply(ctx: Context, config: Config = {}): void {
   // Auto-acquire: a visible Edge window waits for the sign-in, then its Cookie
   // is committed through the same reference the snapshot route reads.
   const acquirer = new CookieAcquirer({
+    credentialRef: spec.cookieEnv,
     save: async cookie => {
       await ctx.credentials.set(credentialRef(spec.cookieEnv), cookie)
     },
   })
   ctx.effect(() => async () => { await acquirer.dispose() }, 'ui-stock-pnl: acquire teardown')
 
-  addRoute('/api/stock-pnl/cookie', settingHandler(ctx, spec.cookieEnv, true))
+  addRoute('/api/stock-pnl/cookie', settingHandler(ctx, spec.cookieEnv, true, value => acquirer.saveCookie(value)))
   addRoute('/api/stock-pnl/fund-key', settingHandler(ctx, spec.fundKeyEnv, false))
 
   // Verify: probe the ledger with the stored Cookie and report whether it works.
