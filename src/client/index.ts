@@ -3,17 +3,16 @@
  * frame-wide `shell.overlay` layer. The card polls the same-origin
  * `/api/stock-pnl` route the node half serves and renders the normalized
  * snapshot; the Cookie stays on the host. A settings button saves the Cookie
- * through the credential Remote API (`credentials.set`), the same channel the
- * Models settings page uses for API keys.
+ * through this plugin's same-origin host routes.
  * @module @deepseek-ai/dsh-client-ui-stock-pnl/client
  */
 
 import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
-import type { ConnectionHandle } from '@deepseek-ai/dsh-api-remotes/client'
 // Type-only: pulls ui-layout's SlotMap merge (the `shell.overlay` list entry).
 import type {} from '@deepseek-ai/dsh-client-ui-layout/client'
 import { StockPnlCard } from './StockPnlCard.tsx'
 import type { StockPnlInjected } from './StockPnlCard.tsx'
+import { saveSetting } from './settings.ts'
 
 export type { StockPnlInjected } from './StockPnlCard.tsx'
 
@@ -22,8 +21,8 @@ export const COOKIE_REF = 'STOCK_PNL_COOKIE'
 /** The credential reference for the ledger fund key (matches the default `fundKeyEnv`). */
 export const FUND_KEY_REF = 'STOCK_PNL_FUND_KEY'
 
-/** Required services: the slot registry and the Remote API carrier. */
-export const inject = ['slots', 'connection']
+/** Required service: the slot registry. */
+export const inject = ['slots']
 
 /**
  * Client plugin body: contribute the card as one additive entry of the
@@ -34,18 +33,16 @@ export const inject = ['slots', 'connection']
  * @param ctx - client root context.
  */
 export function apply(ctx: ClientContext): void {
-  const connection = ctx.get('connection') as ConnectionHandle
-
   ctx.slots.inject('shell.overlay', () => ctx.slots.register({
     name: 'shell.overlay',
     id: 'stock-pnl',
     order: 100,
     inject: (): StockPnlInjected => ({
       onSaveCookie: async (value) => {
-        await connection.api.credentials.set({ ref: COOKIE_REF, value })
+        await saveSetting('cookie', value)
       },
       onSaveFundKey: async (value) => {
-        await connection.api.credentials.set({ ref: FUND_KEY_REF, value })
+        await saveSetting('fund-key', value)
       },
     }),
   }, StockPnlCard))

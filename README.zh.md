@@ -55,20 +55,20 @@ dsh plugin --profile web add dsh-ths-holdings
 4. 登录成功后窗口自动关闭，Cookie 自动保存，卡片立即刷新并显示你的持仓。
 5. 插件自动发现你的组合——如有多个，从下拉框选一个即可。
 
-> 自动获取的 Edge 窗口带有反自动化伪装（隐藏 `navigator.webdriver`、关闭 AutomationControlled 特性）以通过同花顺风控。若个别网络/时段下页面仍显示 **Nginx forbidden**，在弹出窗口里按 `F5` 刷新或手动访问 [https://tzzb.10jqka.com.cn](https://tzzb.10jqka.com.cn) 即可，登录完成后点卡片上的「**我已登录，继续 →**」；Cookie 仅保留 `10jqka` 域字段，不会整段明文落盘。
+> 自动获取使用独立的临时浏览器配置，只通过浏览器层接口读取 Cookie，不连接网页调试器、不注入脚本、不模拟页面尺寸。保存时仅保留 `10jqka.com.cn` 及其子域的 Cookie，浏览器关闭后删除临时配置。登录过程中无需打开开发者工具。
 
 **手动方式（如偶尔需要）**：
 
 1. 打开 [https://tzzb.10jqka.com.cn](https://tzzb.10jqka.com.cn) 并登录。
-2. 按 **F12 → 控制台**，运行：
-   ```javascript
-   copy(document.cookie)
-   ```
-3. Cookie 已复制到剪贴板。
-4. 打开 DSH 网页 GUI，点击卡片上的 **⚙**，把 Cookie 粘贴进 **STOCK_PNL_COOKIE** → **保存**。
-5. 保存后卡片会当场校验 Cookie——显示 **✓ 有效** 或 **✗ 无效**（无效会给出原因与提示）。
+2. **用鼠标点击浏览器右上角菜单 → 更多工具 → 开发者工具**（Edge 为 `…`，Chrome 为 `⋮`）。本页按 F12 可能无反应，请从浏览器菜单打开。
+3. **保持开发者工具打开**，切换到 **网络 / Network**，然后刷新投资账本页面，让工具记录请求。
+4. 在请求列表中选择发往 **`tzzb.10jqka.com.cn`** 的页面或账本接口请求，展开 **标头 / Headers → 请求标头 / Request Headers**，找到 **Cookie**，复制它的完整值。只复制 `name=value; name2=value2` 这部分，不要带 `Cookie:` 前缀，也不要复制响应中的 `Set-Cookie`。
+5. 回到 DSH 网页 GUI，点击卡片上的 **⚙**，把 Cookie 粘贴进 **STOCK_PNL_COOKIE** → **保存**。
+6. 保存后卡片会当场校验 Cookie——显示 **✓ 有效** 或 **✗ 无效**（无效会给出原因与提示）。
 
-会话 Cookie 会过期——过期时卡片显示 **Token 已过期** 横幅，重开 ⚙ 点 **自动获取**（或重复手动步骤 1–4）即可（`v` 反爬令牌自动处理，无需关心）。
+如果网页出现「当前页面不支持开发者工具」，可先查看 Network 中已记录的本站请求是否带有 Cookie；没有可复制的 Cookie 时，改用上面的自动获取。手动查看 Cookie 时需要保持开发者工具打开。
+
+会话 Cookie 会过期——过期时卡片显示 **Token 已过期** 横幅，重开 ⚙ 点 **自动获取**（或重复手动步骤 1–5）即可。
 
 > 💡 完成一笔新交易后，请在投资账本 **APP** 上重新上传数据到网页版，避免两端持仓不一致。
 >
@@ -103,16 +103,18 @@ dsh plugin --profile web add dsh-ths-holdings
 │  · GET /api/stock-pnl          快照      │
 │  · GET /api/stock-pnl/portfolios 账户列表 │
 │  · GET /api/stock-pnl/verify    Cookie 校验 │
-│  · POST /api/stock-pnl/acquire*  自动登录 │
+│  · POST /api/stock-pnl/cookie   保存 Cookie │
+│  · POST /api/stock-pnl/fund-key 保存组合    │
+│  · GET /api/stock-pnl/acquire*   自动登录 │
 │  通过 ctx.credentials 解析 Cookie        │
 │  自动发现 user_id + fund_key             │
 │  POST 同花顺账本 API                     │
 └───────────────────────────────────────────┘
 ```
 
-node 半区每次请求通过凭据引用通道（`ctx.credentials`）读取登录 Cookie——浏览器端永远看不到它。携带凭据的请求不跟随重定向。`v` 反爬令牌按 User-Agent 每次现算，存储的 Cookie 只需会话字段。
+node 半区每次请求通过凭据引用通道（`ctx.credentials`）读取登录 Cookie。手动粘贴通过插件同源 POST 接口保存，保存后的 Cookie 不会回传浏览器端；自动获取的 Cookie 只在宿主中处理。携带凭据的请求不跟随重定向。
 
-「自动获取 Cookie」走宿主进程内的 `acquire.ts` 状态机：点按钮 → 弹出反自动化的 Edge 窗口打开投资账本 → 检测到登录态（`userid` cookie）后自动收集该域 Cookie、写入凭据并关闭窗口；超时 / 用户关窗 / 页面被风控拦截都会在卡片上显示可操作提示。
+「自动获取 Cookie」走宿主进程内的 `acquire.ts` 状态机：点按钮 → 用系统 Edge / Chrome 打开投资账本 → 浏览器层读取到 `userid` 后保存本站 Cookie 并关闭窗口。`login-browser.ts` 使用专用通信管道，不监听调试端口，不启用网页的 Runtime / Debugger，也不读取页面内容；网页风控提示需用户查看。取消、超时、关窗和保存失败都有相应处理。手动保存不再依赖 DSH 旧版的 `connection.api.credentials`，并遵循宿主配置的凭据名称。
 
 ## 配置
 
@@ -133,7 +135,9 @@ dsh-ths-holdings/
 ├── src/
 │   ├── index.ts            # node 半区：webServer 路由 + 凭据解析
 │   ├── fetch.ts            # 同花顺账本 API 调用 + 自动发现 + Cookie 校验
-│   ├── acquire.ts          # 自动获取 Cookie（playwright-core 驱动 Edge）
+│   ├── acquire.ts          # 自动获取 Cookie 状态机
+│   ├── login-browser.ts    # 系统浏览器启动和 Cookie 读取
+│   ├── settings.ts         # 手动保存 Cookie / 组合
 │   └── client/
 │       ├── index.ts        # 浏览器半区：shell.overlay 注册
 │       └── StockPnlCard.tsx
@@ -149,8 +153,10 @@ dsh-ths-holdings/
 | 现象 | 原因与解决 |
 |---|---|
 | 卡片显示 `请配置 Cookie` | `STOCK_PNL_COOKIE` 为空——在 ⚙ 面板点「自动获取」或手动粘贴。 |
-| 卡片显示 `Token 已过期` | 会话 Cookie 过期——在 ⚙ 面板点「自动获取」重新登录，或手动重新 `copy(document.cookie)` 粘贴。 |
-| 点「自动获取」提示缺少 playwright-core | `playwright-core` 未随包装入（通常是历史安装或手动剔除依赖导致）——重新 `pnpm add dsh-ths-holdings`（或 `npm i playwright-core`）后**重启 dsh web** 再试。 |
+| 卡片显示 `Token 已过期` | 会话 Cookie 过期——重新自动获取，或按上方手动步骤复制请求标头中的 Cookie。 |
+| 保存时报 `Cannot read properties of undefined (reading 'credentials')` | 旧插件调用了 DSH 已变更的客户端接口。安装修复版本，重启 `dsh web` 并刷新 DSH 页面。 |
+| 按 F12 没反应 | 从浏览器右上角菜单 → 更多工具 → 开发者工具打开，再按手动步骤查找 Cookie。 |
+| 登录页面提示「当前页面不支持开发者工具」 | 自动获取不需要打开开发者工具。手动方式可先查看 Network 已记录的本站请求；没有可用 Cookie 时改用自动获取。 |
 | 自动获取弹出窗口后没有反应 | 在弹出窗口完成登录（扫码 / 账号），登录后窗口会自动关闭并保存。 |
 | 弹出窗口显示 `Nginx forbidden` | 同花顺风控偶发拦截——在窗口里 F5 刷新或手动访问登录页重试；登录完成后点「我已登录，继续 →」。 |
 | 保存后徽标显示 `✗ 无效` | 粘贴的 Cookie 已失效或不是投资账本会话——重新登录获取后再试；面板会给出具体原因。 |
@@ -170,8 +176,13 @@ dsh-ths-holdings/
 
 - **账本 API 是未公开的、需登录的端点** — 响应格式可能变化，Cookie 会过期；插件以错误呈现，而不是重试或缓存。
 - **组合列表端点（`account_list`）需要先保存 Cookie** — 粘贴有效 Cookie 后组合选择器才会出现。
-- **自动获取复用系统浏览器** — 依赖随包安装的 playwright-core，自动选择已安装的 Edge / Chrome；机器上两者都没有时自动获取不可用（退化为手动粘贴），卡片会给出明确提示。
+- **自动获取使用系统浏览器** — 无需安装 Playwright，自动选择已安装的 Edge / Chrome；机器上两者都没有时需手动粘贴。浏览器必须运行在可显示窗口的桌面会话中。
 - **无服务端轮询** — 路由按请求拉取，卡片按配置的 `pollMs` 间隔轮询；没有共享缓存或推送通道。
+
+## 本地验证
+
+`npm test` 运行离线回归测试，`npm run typecheck` 和 `npm run build` 检查并构建插件。
+`npm run test:browser` 会打开临时浏览器访问本机测试页，验证 Cookie 读取和常见开发者工具检测信号；不会访问真实账本。真实登录和持仓校验需使用者完成。
 
 ## License
 

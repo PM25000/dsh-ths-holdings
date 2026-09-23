@@ -83,6 +83,9 @@ jobs:
       - name: Typecheck
         run: pnpm typecheck
 
+      - name: Test
+        run: pnpm test
+
       - name: Verify release version
         run: |
           pkg_version=$(node -p "require('./package.json').version")
