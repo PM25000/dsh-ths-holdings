@@ -69,4 +69,49 @@ describe('credential write deadlines and cancellation', () => {
     assert.equal(writer.pending, false)
     await assert.rejects(writer.save('secret', controller.signal), /停止等待/)
   })
+
+  it('shares pending writes by reference across new instances and module reloads', async () => {
+    const pending = deferred()
+    const values: string[] = []
+    const oldWriter = new CredentialWriter(async value => { await pending.promise; values.push(value) }, 10, 'TEST_RELOAD_COOKIE')
+    await assert.rejects(oldWriter.save('old'), /超时/)
+    // A fresh module instance models hot reload without retaining the old class or closure.
+    const { CredentialWriter: ReloadedWriter } = await import('../src/credential-writer.ts?reload=regression')
+    const newWriter = new ReloadedWriter(async value => { values.push(value) }, 10, 'TEST_RELOAD_COOKIE')
+    try {
+      assert.equal(newWriter.pending, true)
+      await assert.rejects(newWriter.save('new'), /仍在处理中/)
+      assert.deepEqual(values, [])
+      const other = new ReloadedWriter(async value => { values.push(value) }, 10, 'TEST_OTHER_COOKIE')
+      await other.save('unrelated')
+    } finally {
+      pending.resolve()
+      await nextTurn()
+    }
+    assert.equal(newWriter.pending, false)
+    await newWriter.save('new')
+    assert.deepEqual(values, ['unrelated', 'old', 'new'])
+  })
+
+  it('keeps a shared lock after cancellation and releases it on late provider failure', async () => {
+    const pending = deferred()
+    const started = deferred()
+    const controller = new AbortController()
+    const oldWriter = new CredentialWriter(() => { started.resolve(); return pending.promise }, 30_000, 'TEST_CANCEL_COOKIE')
+    const saving = oldWriter.save('old', controller.signal)
+    await started.promise
+    controller.abort()
+    await assert.rejects(saving, /停止等待/)
+    let saved = ''
+    const newWriter = new CredentialWriter(async value => { saved = value }, 30_000, 'TEST_CANCEL_COOKIE')
+    try {
+      await assert.rejects(newWriter.save('new'), /仍在处理中/)
+      assert.equal(saved, '')
+    } finally {
+      pending.reject(new Error('private provider error'))
+      await nextTurn()
+    }
+    await newWriter.save('new')
+    assert.equal(saved, 'new')
+  })
 })

@@ -220,6 +220,55 @@ describe('human login acquisition', () => {
     assert.equal(launches, 2)
     await acquirer.dispose()
   })
+
+  it('rejects manual saves throughout browser startup and login, then allows them after cancellation', async () => {
+    const f = fixture()
+    const launch = deferred<LoginBrowser>()
+    const values: string[] = []
+    const acquirer = new CookieAcquirer({ launchBrowser: () => launch.promise, save: async value => { values.push(value) } })
+    const starting = acquirer.start()
+    try {
+      await assert.rejects(acquirer.saveCookie('userid=manual'), /自动登录/)
+      launch.resolve(f.browser)
+      await starting
+      await assert.rejects(acquirer.saveCookie('userid=manual'), /自动登录/)
+      assert.deepEqual(values, [])
+      await acquirer.cancel()
+      await acquirer.saveCookie('userid=manual')
+      assert.deepEqual(values, ['userid=manual'])
+    } finally {
+      launch.resolve(f.browser)
+      await acquirer.dispose()
+    }
+  })
+
+  it('does not launch automatic login while a manual save is in flight', async () => {
+    const pending = deferred<void>()
+    const acquirer = new CookieAcquirer({
+      save: () => pending.promise,
+      launchBrowser: async () => assert.fail('manual write must prevent launch'),
+    })
+    const writing = acquirer.saveCookie('userid=manual')
+    try {
+      const result = await acquirer.start()
+      assert.equal(result.state, 'idle')
+      assert.equal(result.pending_save, true)
+    } finally {
+      pending.resolve()
+      await writing
+      await acquirer.dispose()
+    }
+  })
+
+  it('refuses new saves and launches through an instance that has been disposed', async () => {
+    const acquirer = new CookieAcquirer({
+      save: async () => assert.fail('disposed instance must not save'),
+      launchBrowser: async () => assert.fail('disposed instance must not launch'),
+    })
+    await acquirer.dispose()
+    await assert.rejects(acquirer.saveCookie('userid=late-request'), /重新加载/)
+    assert.match((await acquirer.start()).error!, /重新加载/)
+  })
 })
 
 describe('browser pipe transport', () => {

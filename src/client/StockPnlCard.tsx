@@ -259,7 +259,7 @@ export function StockPnlCard({ onSaveCookie, onSaveFundKey }: StockPnlInjected):
 
   /** Start the auto-acquire flow: the host opens a visible Edge window. */
   const startAcquire = async (): Promise<void> => {
-    if (acqBusy) return
+    if (acqBusy || saving || pendingSave) return
     completedAcquire.current = false
     setAcqBusy(true)
     setSaved(false)
@@ -323,6 +323,7 @@ export function StockPnlCard({ onSaveCookie, onSaveFundKey }: StockPnlInjected):
   const pnlSign = showAmount ? yk : pnl
 
   const save = async (): Promise<void> => {
+    if (saving || acqBusy || acquiring || pendingSave) return
     setSaving(true)
     setSaveError(null)
     setSaved(false)
@@ -422,7 +423,7 @@ export function StockPnlCard({ onSaveCookie, onSaveFundKey }: StockPnlInjected):
 
           {(acq === null || acq.state === 'idle') ? (
             <div className={css.acqRow}>
-              <button type="button" className={css.autoBtn} onClick={() => { void startAcquire() }} disabled={acqBusy || pendingSave}>
+              <button type="button" className={css.autoBtn} onClick={() => { void startAcquire() }} disabled={acqBusy || saving || pendingSave}>
                 {acqBusy ? '启动浏览器…' : '🖥 自动获取 Cookie（推荐）'}
               </button>
               <span className={css.acqTip}>弹出浏览器窗口，扫码登录后自动保存</span>
@@ -443,7 +444,7 @@ export function StockPnlCard({ onSaveCookie, onSaveFundKey }: StockPnlInjected):
             <div className={css.acqPanel}>
               <div className={css.error}>{acq.error ?? '自动获取失败'}</div>
               {acq.hint !== undefined && acq.hint.length > 0 && <div className={css.acqTip}>{acq.hint}</div>}
-              <button type="button" className={css.autoBtn} onClick={() => { void startAcquire() }} disabled={acqBusy || pendingSave}>重试</button>
+              <button type="button" className={css.autoBtn} onClick={() => { void startAcquire() }} disabled={acqBusy || saving || pendingSave}>重试</button>
             </div>
           )}
 
@@ -509,7 +510,7 @@ export function StockPnlCard({ onSaveCookie, onSaveFundKey }: StockPnlInjected):
             显示金额（¥）
           </label>
           <div className={css.settingsActions}>
-            <button type="button" className={css.saveBtn} onClick={() => { void save() }} disabled={saving || pendingSave || acquiring || draft.trim().length === 0}>
+            <button type="button" className={css.saveBtn} onClick={() => { void save() }} disabled={saving || acqBusy || pendingSave || acquiring || draft.trim().length === 0}>
               保存
             </button>
             <button type="button" className={css.cancelBtn} onClick={() => { setEditing(false) }} disabled={saving}>

@@ -21,6 +21,8 @@ export function cookiesToHeader(cookies: readonly LoginCookie[]): string {
 
 export interface AcquireContext {
   save: (cookie: string) => Promise<void>
+  /** Stable host reference; shares pending writes across plugin lifetimes. */
+  credentialRef?: string
   launchBrowser?: (url: string) => Promise<LoginBrowser>
   pollMs?: number
   timeoutMs?: number
@@ -34,6 +36,7 @@ export class CookieAcquirer {
   private hint = ''
   private startedAt = 0
   private generation = 0
+  private disposed = false
   private browser: LoginBrowser | undefined
   private cleanup = new Set<LoginBrowser>()
   private abort: AbortController | undefined
@@ -46,7 +49,7 @@ export class CookieAcquirer {
 
   constructor(private readonly ctx: AcquireContext) {
     this.now = ctx.now ?? Date.now
-    this.writer = new CredentialWriter(ctx.save, ctx.saveTimeoutMs)
+    this.writer = new CredentialWriter(ctx.save, ctx.saveTimeoutMs, ctx.credentialRef)
   }
 
   status(): AcquireStatusView {
@@ -68,6 +71,7 @@ export class CookieAcquirer {
   }
 
   start(): Promise<AcquireStatusView> {
+    if (this.disposed) return Promise.resolve({ ...this.status(), state: 'failed', error: new CredentialWriteError('inactive').message })
     if (this.cancelling) return this.cancelling.then(() => this.start())
     if (this.starting) return this.starting
     if (this.state === 'acquiring') return Promise.resolve(this.status())
@@ -129,11 +133,16 @@ export class CookieAcquirer {
     return this.status()
   }
 
-  async dispose(): Promise<void> { await this.cancel() }
+  async dispose(): Promise<void> {
+    this.disposed = true
+    await this.cancel()
+  }
 
-  /** Manual and automatic saves share the lock, including writes that settle late. */
-  saveCookie(value: string, signal?: AbortSignal): Promise<void> {
-    return this.writer.save(value, signal)
+  /** Manual saves cannot race a login that has not dispatched its write yet. */
+  async saveCookie(value: string): Promise<void> {
+    if (this.disposed) throw new CredentialWriteError('inactive')
+    if (this.state === 'acquiring' || this.starting || this.cancelling) throw new CredentialWriteError('acquiring')
+    await this.writer.save(value)
   }
 
   private stopTimer(): void {
@@ -167,7 +176,7 @@ export class CookieAcquirer {
       const cookies = await browser.cookies()
       if (!active() || !isSignedIn(cookies)) return
       this.stopTimer()
-      await this.saveCookie(cookiesToHeader(cookies), signal)
+      await this.writer.save(cookiesToHeader(cookies), signal)
       if (!active()) return
       this.state = 'saved'
       this.error = ''

@@ -185,6 +185,7 @@ export function apply(ctx: Context, config: Config = {}): void {
   // Auto-acquire: a visible Edge window waits for the sign-in, then its Cookie
   // is committed through the same reference the snapshot route reads.
   const acquirer = new CookieAcquirer({
+    credentialRef: spec.cookieEnv,
     save: async cookie => {
       await ctx.credentials.set(credentialRef(spec.cookieEnv), cookie)
     },

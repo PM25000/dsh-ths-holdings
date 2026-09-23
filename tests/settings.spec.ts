@@ -14,7 +14,7 @@ async function host(fail = false, beforeSave?: () => Promise<void>) {
   const values = new Map<string, string>()
   const routes = new Map<string, WebRoute>()
   const disposers: Array<() => void | Promise<void>> = []
-  apply({
+  const mount = () => apply({
     credentials: {
       set: async (ref: string, value: string) => {
         await beforeSave?.()
@@ -26,6 +26,8 @@ async function host(fail = false, beforeSave?: () => Promise<void>) {
     webServer: { register: (route: WebRoute) => { routes.set(route.path, route); return () => { routes.delete(route.path) } } },
     effect: (callback: () => () => void | Promise<void>) => { disposers.push(callback()) },
   } as unknown as Context, { cookieEnv: 'CUSTOM_COOKIE', fundKeyEnv: 'CUSTOM_FUND' })
+  const unmount = async () => { for (const dispose of disposers.splice(0)) await dispose() }
+  mount()
   const server = createServer((req, res) => {
     const route = routes.get(req.url!)
     if (!route) { res.writeHead(404); res.end(); return }
@@ -33,10 +35,12 @@ async function host(fail = false, beforeSave?: () => Promise<void>) {
   })
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
   cleanup.push(async () => {
-    for (const dispose of disposers) await dispose()
+    await unmount()
     await new Promise<void>(resolve => server.close(() => resolve()))
   })
-  return { values, url: `http://127.0.0.1:${(server.address() as AddressInfo).port}` }
+  return { values, url: `http://127.0.0.1:${(server.address() as AddressInfo).port}`,
+    reload: async () => { await unmount(); mount() },
+  }
 }
 const json = (value: unknown): RequestInit => ({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ value }) })
 
@@ -110,5 +114,26 @@ describe('settings host routes', () => {
       assert.equal(h.values.get('CUSTOM_COOKIE'), 'userid=test')
       await assert.rejects(saveSetting('cookie', ''), /不能为空/)
     } finally { globalThis.fetch = original }
+  })
+
+  it('preserves write exclusion when the plugin is re-applied to a fresh context', async () => {
+    let release!: () => void
+    let started!: () => void
+    const pending = new Promise<void>(resolve => { release = resolve })
+    const writing = new Promise<void>(resolve => { started = resolve })
+    let calls = 0
+    const h = await host(false, () => { if (++calls === 1) { started(); return pending }; return Promise.resolve() })
+    const url = `${h.url}/api/stock-pnl/cookie`
+    const first = fetch(url, json('userid=old'))
+    await writing
+    try {
+      await h.reload()
+      const status = await (await fetch(`${h.url}/api/stock-pnl/acquire/status`)).json() as { pending_save?: boolean }
+      assert.equal(status.pending_save, true)
+      assert.equal((await fetch(url, json('userid=new'))).status, 409)
+      assert.equal(calls, 1)
+    } finally { release(); await first }
+    assert.equal((await fetch(url, json('userid=new'))).status, 200)
+    assert.equal(h.values.get('CUSTOM_COOKIE'), 'userid=new')
   })
 })

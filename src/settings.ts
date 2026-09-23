@@ -56,7 +56,7 @@ export function settingHandler(ctx: Context, ref: string, cookie: boolean, save?
       reply(200)
     } catch (error) {
       if (error instanceof CredentialWriteError) {
-        reply(error.code === 'busy' ? 409 : error.code === 'timeout' ? 504 : 500, error.message)
+        reply(error.code === 'timeout' ? 504 : error.code === 'failed' ? 500 : 409, error.message)
         return
       }
       // Provider errors may contain the submitted secret; never echo or log them.
