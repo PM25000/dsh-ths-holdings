@@ -1,5 +1,5 @@
 /** Browser-level cookie access, without attaching a debugger to login pages. */
-import { spawn } from 'node:child_process'
+import { spawn, type ChildProcess } from 'node:child_process'
 import { access, mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -122,43 +122,56 @@ export async function launchLoginBrowser(url: string): Promise<LoginBrowser> {
 
 async function launchExecutable(executable: string, url: string): Promise<LoginBrowser> {
   const profile = await mkdtemp(join(tmpdir(), 'dsh-ths-login-'))
-  const child = spawn(executable, [
-    `--user-data-dir=${profile}`, '--remote-debugging-pipe', '--no-first-run',
-    '--no-default-browser-check', '--no-startup-window', '--disable-background-mode',
-    '--disable-blink-features=AutomationControlled',
-  ], { stdio: ['ignore', 'ignore', 'ignore', 'pipe', 'pipe'], windowsHide: false })
-  const pipe = new BrowserPipe(child.stdio[3] as Writable, child.stdio[4] as Readable)
+  let child: ChildProcess | undefined
+  let pipe: BrowserPipe | undefined
   let exited = false
+  let done!: () => void
   const exit = new Promise<void>(resolve => {
-    const done = (): void => { exited = true; pipe.dispose(); resolve() }
-    child.once('exit', done)
-    child.on('error', () => {
-      // A failed kill also emits error; it does not mean an existing process exited.
-      if (child.pid === undefined) done()
-    })
+    done = (): void => { exited = true; pipe?.dispose(); resolve() }
   })
+  // Own the profile before starting any operation that can fail during launch.
   const cleanup = new BrowserCleanup({
     exit,
-    requestClose: () => pipe.send('Browser.close'),
-    kill: () => { child.kill() },
-    dispose: () => pipe.dispose(),
+    requestClose: async () => {
+      if (pipe) await pipe.send('Browser.close')
+      else child?.kill() // Pipe setup failed; terminate the process and wait for exit.
+    },
+    kill: () => { child?.kill() },
+    dispose: () => pipe?.dispose(),
     // Only remove the fresh directory created above, after its browser exits.
     removeProfile: () => rm(profile, { recursive: true, force: true, maxRetries: 8, retryDelay: 250 }),
   })
+  const getPipe = (): BrowserPipe => {
+    if (!pipe) throw new Error('登录浏览器通信尚未建立')
+    return pipe
+  }
   const browser: LoginBrowser = {
     get cleanupPending() { return cleanup.pending },
-    cookies: async () => (await pipe.send<{ cookies: LoginCookie[] }>('Storage.getCookies')).cookies,
+    cookies: async () => (await getPipe().send<{ cookies: LoginCookie[] }>('Storage.getCookies')).cookies,
     isClosed: async () => {
       if (exited) return true
-      const { targetInfos } = await pipe.send<{ targetInfos: { type: string }[] }>('Target.getTargets')
+      const { targetInfos } = await getPipe().send<{ targetInfos: { type: string }[] }>('Target.getTargets')
       return !targetInfos.some(target => target.type === 'page')
     },
     close: () => cleanup.close(),
   }
   try {
+    child = spawn(executable, [
+      `--user-data-dir=${profile}`, '--remote-debugging-pipe', '--no-first-run',
+      '--no-default-browser-check', '--no-startup-window', '--disable-background-mode',
+      '--disable-blink-features=AutomationControlled',
+    ], { stdio: ['ignore', 'ignore', 'ignore', 'pipe', 'pipe'], windowsHide: false })
+    child.once('exit', done)
+    child.on('error', () => {
+      // A failed kill also emits error; it does not mean an existing process exited.
+      if (child?.pid === undefined) done()
+    })
+    pipe = new BrowserPipe(child.stdio[3] as Writable, child.stdio[4] as Readable)
     await pipe.send('Target.createTarget', { url, newWindow: true })
     return browser
   } catch (error) {
+    // A synchronous spawn failure leaves no process to wait for.
+    if (!child) done()
     try { await browser.close() } catch { throw new LoginBrowserLaunchError(browser) }
     throw error
   }
