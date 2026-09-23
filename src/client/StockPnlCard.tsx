@@ -216,11 +216,14 @@ export function StockPnlCard({ onSaveCookie, onSaveFundKey }: StockPnlInjected):
         // Auto-select the first portfolio when none has been stored yet.
         if (list.length > 0 && !localStorage.getItem('stock-pnl-fund-key')) {
           const first = list[0]!
+          await onSaveFundKey(first.fund_key)
           setPortfolioFundKey(first.fund_key)
           localStorage.setItem('stock-pnl-fund-key', first.fund_key)
-          try { await onSaveFundKey(first.fund_key) } catch { /* ignore */ }
+          setRefreshKey(k => k + 1)
         }
-      } catch { /* ignore */ } finally {
+      } catch (error) {
+        if (!disposed) setSaveError(error instanceof Error ? error.message : '保存组合失败')
+      } finally {
         if (!disposed) setPortfoliosLoading(false)
       }
     })()
@@ -437,8 +440,8 @@ export function StockPnlCard({ onSaveCookie, onSaveFundKey }: StockPnlInjected):
           )}
 
           <div className={css.manualHint}>
-            或手动：打开 <a className={css.link} href="https://tzzb.10jqka.com.cn" target="_blank" rel="noreferrer">投资账本</a> 登录后，按
-            F12 → 控制台输入 <code className={css.code}>copy(document.cookie)</code>，把结果粘贴到下方：
+            或手动：登录 <a className={css.link} href="https://tzzb.10jqka.com.cn" target="_blank" rel="noreferrer">投资账本</a> 后，点击浏览器右上角菜单 → 更多工具 → 开发者工具（F12 无反应时从菜单打开）。
+            保持工具打开，在「网络 / Network」中刷新页面，选择本站请求，在「请求标头 / Request Headers」中复制 Cookie 的值并粘贴到下方。
           </div>
           <label className={css.settingsLabel} htmlFor="stock-pnl-cookie">STOCK_PNL_COOKIE</label>
           <textarea
@@ -470,9 +473,15 @@ export function StockPnlCard({ onSaveCookie, onSaveFundKey }: StockPnlInjected):
             onChange={async event => {
               const key = event.target.value
               if (!key) return
-              setPortfolioFundKey(key)
-              localStorage.setItem('stock-pnl-fund-key', key)
-              try { await onSaveFundKey(key) } catch { /* ignore */ }
+              try {
+                await onSaveFundKey(key)
+                setPortfolioFundKey(key)
+                localStorage.setItem('stock-pnl-fund-key', key)
+                setSaveError(null)
+                setRefreshKey(k => k + 1)
+              } catch (error) {
+                setSaveError(error instanceof Error ? error.message : '保存组合失败')
+              }
             }}
           >
             <option value="">{portfoliosLoading ? '加载中...' : portfolios.length === 0 ? '暂无组合' : '-- 选择组合 --'}</option>

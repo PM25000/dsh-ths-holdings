@@ -41,8 +41,10 @@
   "scripts": {
     "clean": "rm -rf lib",
     "typecheck": "tsc --noEmit",
-    "build": "tsdown",
-    "prepublishOnly": "pnpm run typecheck && pnpm run build"
+    "test": "node --experimental-transform-types --test tests/*.spec.ts",
+    "test:browser": "node --experimental-transform-types tests/login-browser.smoke.ts",
+    "build": "tsc --emitDeclarationOnly && tsdown",
+    "prepublishOnly": "pnpm run test && pnpm run typecheck && pnpm run build"
   },
   "keywords": [
     "dsh",
@@ -61,8 +63,7 @@
     "node": "^22.19.0 || >=24.0.0"
   },
   "dependencies": {
-    "clsx": "^2.0.0",
-    "playwright-core": "^1.62.1"
+    "clsx": "^2.0.0"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",

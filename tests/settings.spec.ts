@@ -1,0 +1,83 @@
+import assert from 'node:assert/strict'
+import { afterEach, describe, it } from 'node:test'
+import { createServer } from 'node:http'
+import type { AddressInfo } from 'node:net'
+import type { Context } from '@deepseek-ai/cordis'
+import type { WebRoute } from '@deepseek-ai/dsh-host-webserver'
+import { apply } from '../src/index.ts'
+import { saveSetting } from '../src/client/settings.ts'
+
+const cleanup: Array<() => Promise<void>> = []
+afterEach(async () => { for (const close of cleanup.splice(0)) await close() })
+
+async function host(fail = false) {
+  const values = new Map<string, string>()
+  const routes = new Map<string, WebRoute>()
+  const disposers: Array<() => void | Promise<void>> = []
+  apply({
+    credentials: {
+      set: async (ref: string, value: string) => {
+        if (fail) throw new Error(`refused secret: ${value}`)
+        values.set(ref, value)
+      },
+      resolve: async (ref: string) => values.has(ref) ? { value: values.get(ref) } : undefined,
+    },
+    webServer: { register: (route: WebRoute) => { routes.set(route.path, route); return () => { routes.delete(route.path) } } },
+    effect: (callback: () => () => void | Promise<void>) => { disposers.push(callback()) },
+  } as unknown as Context, { cookieEnv: 'CUSTOM_COOKIE', fundKeyEnv: 'CUSTOM_FUND' })
+  const server = createServer((req, res) => {
+    const route = routes.get(req.url!)
+    if (!route) { res.writeHead(404); res.end(); return }
+    void route.handler(req, res)
+  })
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
+  cleanup.push(async () => {
+    for (const dispose of disposers) await dispose()
+    await new Promise<void>(resolve => server.close(() => resolve()))
+  })
+  return { values, url: `http://127.0.0.1:${(server.address() as AddressInfo).port}` }
+}
+const json = (value: unknown): RequestInit => ({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ value }) })
+
+describe('settings host routes', () => {
+  it('persists cookie and fund key through configured references and never echoes secrets', async () => {
+    const h = await host()
+    const response = await fetch(`${h.url}/api/stock-pnl/cookie`, json(' userid=1; sid=abc\n def '))
+    assert.equal(response.status, 200)
+    assert.deepEqual(await response.json(), { saved: true })
+    assert.equal(h.values.get('CUSTOM_COOKIE'), 'userid=1; sid=abcdef')
+    assert.equal((await fetch(`${h.url}/api/stock-pnl/fund-key`, json(' account-2 '))).status, 200)
+    assert.equal(h.values.get('CUSTOM_FUND'), 'account-2')
+  })
+
+  it('rejects GET, cross-site, malformed, oversized, and empty submissions', async () => {
+    const h = await host()
+    const url = `${h.url}/api/stock-pnl/cookie`
+    assert.equal((await fetch(url)).status, 405)
+    assert.equal((await fetch(url, { ...json('secret'), headers: { 'Content-Type': 'application/json', Origin: 'https://other.test' } })).status, 403)
+    assert.equal((await fetch(url, { ...json('secret'), headers: { 'Content-Type': 'text/plain' } })).status, 415)
+    assert.equal((await fetch(url, { ...json('secret'), body: '{' })).status, 400)
+    assert.equal((await fetch(url, json(' '.repeat(4)))).status, 400)
+    assert.equal((await fetch(url, json('s'.repeat(70_000)))).status, 413)
+    assert.equal(h.values.size, 0)
+  })
+
+  it('reports persistence errors without exposing the submitted credential', async () => {
+    const h = await host(true)
+    const response = await fetch(`${h.url}/api/stock-pnl/cookie`, json('sid=private-test'))
+    assert.equal(response.status, 500)
+    assert.ok(!(await response.text()).includes('private-test'))
+    assert.equal(h.values.size, 0)
+  })
+
+  it('saves from the client without any connection.api and propagates server failures', async () => {
+    const h = await host()
+    const original = globalThis.fetch
+    globalThis.fetch = (input, init) => original(`${h.url}${String(input)}`, init)
+    try {
+      await saveSetting('cookie', 'userid=test')
+      assert.equal(h.values.get('CUSTOM_COOKIE'), 'userid=test')
+      await assert.rejects(saveSetting('cookie', ''), /不能为空/)
+    } finally { globalThis.fetch = original }
+  })
+})

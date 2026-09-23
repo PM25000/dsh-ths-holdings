@@ -11,7 +11,8 @@ import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { credentialRef } from '@deepseek-ai/dsh-credentials'
 import type { WebRoute } from '@deepseek-ai/dsh-host-webserver'
-import { CookieAcquirer, resolvePlaywright } from './acquire.ts'
+import { CookieAcquirer } from './acquire.ts'
+import { settingHandler } from './settings.ts'
 import { collectStats, cookieField, fetchFundKey, INDEX_URL, listPortfolios, normalizeCookie, PNL_URL, type Portfolio, verifyCookie } from './fetch.ts'
 import type { Stats } from './types.ts'
 
@@ -184,12 +185,14 @@ export function apply(ctx: Context, config: Config = {}): void {
   // Auto-acquire: a visible Edge window waits for the sign-in, then its Cookie
   // is committed through the same reference the snapshot route reads.
   const acquirer = new CookieAcquirer({
-    resolvePlaywright,
     save: async cookie => {
       await ctx.credentials.set(credentialRef(spec.cookieEnv), cookie)
     },
   })
   ctx.effect(() => async () => { await acquirer.dispose() }, 'ui-stock-pnl: acquire teardown')
+
+  addRoute('/api/stock-pnl/cookie', settingHandler(ctx, spec.cookieEnv, true))
+  addRoute('/api/stock-pnl/fund-key', settingHandler(ctx, spec.fundKeyEnv, false))
 
   // Verify: probe the ledger with the stored Cookie and report whether it works.
   const verifyHandler: WebRoute['handler'] = async (_req, res) => {

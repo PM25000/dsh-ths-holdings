@@ -56,20 +56,20 @@ then `cd $DSH_HOME/profiles/web && pnpm install` and restart `dsh web`. The plug
 4. When the sign-in succeeds the window closes itself, the Cookie is saved automatically, and the card refreshes with your portfolio.
 5. The plugin auto-discovers your portfolio — if you have several, pick one from the dropdown. Done.
 
-> The auto-acquired Edge window ships anti-automation camouflage (hides `navigator.webdriver`, disables the AutomationControlled Blink feature) to pass the Tonghuashun WAF. If a specific network/time still shows **Nginx forbidden**, press `F5` in the popped window or open [https://tzzb.10jqka.com.cn](https://tzzb.10jqka.com.cn) manually, then click **「我已登录，继续 →」** on the card; only `10jqka`-domain cookies are kept, never stored as raw plaintext.
+> Auto-acquire uses a temporary browser profile and reads cookies through browser-level commands. It does not attach a page debugger, inject scripts, or emulate viewport dimensions. Only cookies for `10jqka.com.cn` and its subdomains are saved; the temporary profile is deleted after the browser exits. You do not need to open developer tools during sign-in.
 
 **Manual (backup):**
 
 1. Open [https://tzzb.10jqka.com.cn](https://tzzb.10jqka.com.cn) and log in.
-2. Press **F12 → Console** and run:
-   ```javascript
-   copy(document.cookie)
-   ```
-3. The cookie is now in your clipboard.
-4. Open the DSH web GUI — click **⚙** on the card, paste the cookie into **STOCK_PNL_COOKIE** → **save**.
-5. The card validates the saved cookie immediately — it shows **✓ valid** or **✗ invalid** (with the reason/hint).
+2. **Click the browser's top-right menu → More tools → Developer tools** (`…` in Edge, `⋮` in Chrome). F12 may have no effect on this page; open the tools through the browser menu.
+3. **Keep developer tools open**, select **Network**, then refresh the ledger page to record requests.
+4. Select a page or ledger API request to **`tzzb.10jqka.com.cn`**. Under **Headers → Request Headers**, copy the complete **Cookie** value. Copy only the `name=value; name2=value2` portion, without the `Cookie:` prefix; do not copy a response's `Set-Cookie` header.
+5. Return to the DSH web GUI — click **⚙**, paste the cookie into **STOCK_PNL_COOKIE** → **save**.
+6. The card validates the saved cookie immediately — it shows **✓ valid** or **✗ invalid** (with the reason/hint).
 
-The session cookie expires eventually — when it does, the card shows a **Token 已过期** banner; re-open ⚙ and click **auto-acquire** (or repeat manual steps 1–4) with a fresh cookie (the `v` anti-bot token is handled automatically).
+If the page reports that developer tools are unsupported, first check whether Network has already recorded a ledger request with a Cookie header. If no usable Cookie is available, use auto-acquire above. Keep developer tools open while inspecting cookies manually.
+
+The session cookie expires eventually — when it does, the card shows a **Token 已过期** banner; re-open ⚙ and click **auto-acquire** (or repeat manual steps 1–5) with a fresh cookie.
 
 > 💡 After completing a new trade, re-upload your data from the investment-ledger **app** to the web version so your holdings stay consistent between the two.
 >
@@ -111,9 +111,9 @@ The session cookie expires eventually — when it does, the card shows a **Token
 └───────────────────────────────────────────┘
 ```
 
-The node half reads the login Cookie per request through the credential-reference seam (`ctx.credentials`) — it never reaches the browser. Credential-bearing requests never follow a redirect. The `v` anti-bot token is minted per request from the User-Agent; the stored Cookie only needs its session fields.
+The node half reads the login Cookie per request through the credential-reference seam (`ctx.credentials`). Manually pasted values are submitted to the host and never returned after saving; automatically acquired values stay on the host. Credential-bearing requests never follow a redirect.
 
-Auto-acquire runs an in-host state machine (`acquire.ts`): click the button → an anti-automation Edge window opens the ledger → once the sign-in is detected (`userid` cookie), the host collects that domain's cookies, commits them through the credential seam, and closes the window. Timeout, an early user window-close, or a WAF interception all surface as actionable notices on the card.
+Auto-acquire runs a host state machine (`acquire.ts`): open a system Edge / Chrome window, wait for a `userid` cookie, save ledger-domain cookies and close the window. `login-browser.ts` uses a dedicated pipe with browser-level commands, without opening a debugging port or enabling page Runtime / Debugger sessions. It does not read page contents; the user sees any site refusal directly. Cancellation, timeout, early closure and save failures are handled explicitly. Manual saves use the plugin's same-origin POST routes (`/api/stock-pnl/cookie` and `/api/stock-pnl/fund-key`), respect configured credential references, and no longer depend on DSH's legacy `connection.api.credentials` interface.
 
 ## Config
 
@@ -134,7 +134,9 @@ dsh-ths-holdings/
 ├── src/
 │   ├── index.ts            # node half: webServer routes + credential resolution
 │   ├── fetch.ts            # Tonghuashun ledger API calls + auto-discovery + cookie verify
-│   ├── acquire.ts          # auto-acquire cookie (playwright-core drives Edge)
+│   ├── acquire.ts          # cookie acquisition state machine
+│   ├── login-browser.ts    # system browser launch and cookie access
+│   ├── settings.ts         # write-only cookie / portfolio routes
 │   └── client/
 │       ├── index.ts        # browser half: shell.overlay registration
 │       └── StockPnlCard.tsx
@@ -150,8 +152,10 @@ dsh-ths-holdings/
 | Symptom | Cause & fix |
 |---|---|
 | Card shows `请配置 Cookie` | `STOCK_PNL_COOKIE` is empty — click **auto-acquire** in the ⚙ panel, or paste manually. |
-| Card shows `Token 已过期` | The session Cookie expired — click **auto-acquire** in the ⚙ panel to re-sign-in, or re-run `copy(document.cookie)` and paste. |
-| Auto-acquire reports missing playwright-core | `playwright-core` did not ship with the install (typically a legacy install or a manually pruned dependency tree) — re-`pnpm add dsh-ths-holdings` (or `npm i playwright-core`), restart `dsh web`, retry. |
+| Card shows `Token 已过期` | Re-acquire the cookie or copy the Cookie request header using the manual steps above. |
+| Saving reports `Cannot read properties of undefined (reading 'credentials')` | The old plugin used a changed DSH client interface. Install the fix, restart `dsh web`, and refresh the DSH page. |
+| F12 has no effect | Click the browser's top-right menu → More tools → Developer tools, then follow the manual steps. |
+| Login page says developer tools are unsupported | Auto-acquire does not require developer tools. For manual acquisition, check already recorded ledger requests in Network; if no usable Cookie is available, use auto-acquire. |
 | Popped window shows `Nginx forbidden` | The Tonghuashun WAF intermittently refuses automation — F5 in the window or open the ledger URL manually, then click **「我已登录，继续 →」**. |
 | No portfolio in the dropdown | The account list needs a valid Cookie first; save the Cookie, then click ↻ to refresh. |
 | Multiple portfolios | Select the one you want from the dropdown — the choice is saved as `STOCK_PNL_FUND_KEY`. |
@@ -169,7 +173,7 @@ None — the plugin contributes no prompt, schema, or result.
 
 - **The ledger API is an undocumented, login-gated endpoint** — its response format can change and the Cookie expires; the plugin surfaces both as errors rather than retrying or caching.
 - **The portfolio list endpoint (`account_list`) requires the Cookie to be saved first** — the portfolio selector appears after you paste a valid Cookie.
-- **Auto-acquire reuses a system browser** — it drives the bundled playwright-core dependency against whichever of Edge / Chrome is installed (first found wins); with neither present auto-acquire is unavailable (manual paste still works) and the card says so explicitly.
+- **Auto-acquire uses a system browser** — no Playwright installation is needed. Edge or Chrome must be installed and the host must have a visible desktop session; otherwise use manual paste.
 - **No server-side polling** — the route fetches on each request and the card polls at the configured `pollMs` interval; there is no shared cache or push channel.
 
 ## License
