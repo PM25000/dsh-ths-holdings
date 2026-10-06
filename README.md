@@ -20,9 +20,7 @@ Unlike watchlist tools, this plugin reads your **actual positions** and shows yo
 
 ## Installation
 
-This branch targets the DSH **0.2 series** and has been tested with Desktop **0.2.0-rc.2**, without a compatibility exemption. For DSH 0.1, keep plugin **0.2.0**; this migration does not support the older host.
-
-Until the migrated version is published, build this checkout and install it as a local `file:` dependency. The current npm 0.2.0 release targets the older host. After publication, use the installation steps below.
+Plugin **0.2.1** targets the DSH **0.2 series** and has been tested with Desktop **0.2.0-rc.2**, without a compatibility exemption. For DSH 0.1, keep plugin **0.2.0**; this migration does not support the older host.
 
 ```sh
 dsh plugin --profile web add dsh-ths-holdings
@@ -35,7 +33,7 @@ To install manually (without `dsh plugin`), edit `$DSH_HOME/profiles/web/package
 ```jsonc
 {
   "dependencies": {
-    "dsh-ths-holdings": "latest"
+    "dsh-ths-holdings": "^0.2.1"
   },
   "dsh": {
     "profile": {

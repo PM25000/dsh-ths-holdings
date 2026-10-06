@@ -19,9 +19,7 @@
 
 ## 安装
 
-本分支适配 DSH **0.2 系列**，已在 Desktop **0.2.0-rc.2** 验证加载与运行，无需版本兼容性豁免。DSH 0.1 系列请保留旧插件 **0.2.0**；本次适配不支持旧宿主。
-
-适配版本发布前，请从本仓库构建并通过 `file:` 依赖安装本地 checkout；当前 npm 的 0.2.0 仍是旧宿主版本。发布后可按下面的方式安装。
+插件 **0.2.1** 适配 DSH **0.2 系列**，已在 Desktop **0.2.0-rc.2** 验证加载与运行，无需版本兼容性豁免。DSH 0.1 系列请保留旧插件 **0.2.0**；本次适配不支持旧宿主。
 
 ```sh
 dsh plugin --profile web add dsh-ths-holdings
@@ -34,7 +32,7 @@ dsh plugin --profile web add dsh-ths-holdings
 ```jsonc
 {
   "dependencies": {
-    "dsh-ths-holdings": "latest"
+    "dsh-ths-holdings": "^0.2.1"
   },
   "dsh": {
     "profile": {
