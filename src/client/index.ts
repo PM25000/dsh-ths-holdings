@@ -7,7 +7,9 @@
  * @module @deepseek-ai/dsh-client-ui-stock-pnl/client
  */
 
-import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
+import type { Context } from '@deepseek-ai/cordis'
+// The renderer now owns the ctx.slots service; ui-slots supplies the pure contracts.
+import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 // Type-only: pulls ui-layout's SlotMap merge (the `shell.overlay` list entry).
 import type {} from '@deepseek-ai/dsh-client-ui-layout/client'
 import { StockPnlCard } from './StockPnlCard.tsx'
@@ -32,7 +34,7 @@ export const inject = ['slots']
  * through the host credential seam.
  * @param ctx - client root context.
  */
-export function apply(ctx: ClientContext): void {
+export function apply(ctx: Context): void {
   ctx.slots.inject('shell.overlay', () => ctx.slots.register({
     name: 'shell.overlay',
     id: 'stock-pnl',

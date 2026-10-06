@@ -11,9 +11,7 @@ const REPOSITORY_ROOT = fileURLToPath(new URL('.', import.meta.url))
 const PLATFORM_MODULES = [
   '@deepseek-ai/cordis',
   '@deepseek-ai/schemastery',
-  '@deepseek-ai/dsh-client-runtime/client',
-  '@deepseek-ai/dsh-api-remotes/client',
-  '@deepseek-ai/dsh-client-ui-slots/client',
+  '@deepseek-ai/dsh-client-ui-slots',
   '@deepseek-ai/dsh-client-ui-layout/client',
   'react',
 ]

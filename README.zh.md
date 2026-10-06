@@ -19,6 +19,10 @@
 
 ## 安装
 
+本分支适配 DSH **0.2 系列**，已在 Desktop **0.2.0-rc.2** 验证加载与运行，无需版本兼容性豁免。DSH 0.1 系列请保留旧插件 **0.2.0**；本次适配不支持旧宿主。
+
+适配版本发布前，请从本仓库构建并通过 `file:` 依赖安装本地 checkout；当前 npm 的 0.2.0 仍是旧宿主版本。发布后可按下面的方式安装。
+
 ```sh
 dsh plugin --profile web add dsh-ths-holdings
 ```
@@ -30,7 +34,7 @@ dsh plugin --profile web add dsh-ths-holdings
 ```jsonc
 {
   "dependencies": {
-    "dsh-ths-holdings": "^0.1.0"
+    "dsh-ths-holdings": "latest"
   },
   "dsh": {
     "profile": {
@@ -187,6 +191,8 @@ dsh-ths-holdings/
 
 `npm test` 运行离线回归测试，`npm run typecheck` 和 `npm run build` 检查并构建插件。
 `npm run test:browser` 会打开临时浏览器访问本机测试页，验证 Cookie 读取和常见开发者工具检测信号；不会访问真实账本。真实登录和持仓校验需使用者完成。
+
+`npm run test:desktop-compat` 使用已安装 Desktop 的真实运行时，在独立 profile 中验证插件加载、凭据保存与读取、Cookie 校验、组合选择和盈亏接口。账本响应使用本机测试服务，不使用真实账户；现有 DSH 配置不参与测试。默认查找 Windows 标准安装目录，其他安装位置可通过 `DSH_DESKTOP_EXECUTABLE` 和 `DSH_DESKTOP_RESOURCES` 指定。追加 `--serve` 直接运行测试脚本可保留测试服务供页面检查；独立测试目录位于 `dist/desktop-compat-*`。
 
 ## License
 
