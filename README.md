@@ -20,6 +20,10 @@ Unlike watchlist tools, this plugin reads your **actual positions** and shows yo
 
 ## Installation
 
+This branch targets the DSH **0.2 series** and has been tested with Desktop **0.2.0-rc.2**, without a compatibility exemption. For DSH 0.1, keep plugin **0.2.0**; this migration does not support the older host.
+
+Until the migrated version is published, build this checkout and install it as a local `file:` dependency. The current npm 0.2.0 release targets the older host. After publication, use the installation steps below.
+
 ```sh
 dsh plugin --profile web add dsh-ths-holdings
 ```
@@ -31,7 +35,7 @@ To install manually (without `dsh plugin`), edit `$DSH_HOME/profiles/web/package
 ```jsonc
 {
   "dependencies": {
-    "dsh-ths-holdings": "^0.1.0"
+    "dsh-ths-holdings": "latest"
   },
   "dsh": {
     "profile": {
@@ -179,6 +183,12 @@ None — the plugin contributes no prompt, schema, or result.
 - **The portfolio list endpoint (`account_list`) requires the Cookie to be saved first** — the portfolio selector appears after you paste a valid Cookie.
 - **Auto-acquire uses a system browser** — no Playwright installation is needed. Edge or Chrome must be installed and the host must have a visible desktop session; otherwise use manual paste.
 - **No server-side polling** — the route fetches on each request and the card polls at the configured `pollMs` interval; there is no shared cache or push channel.
+
+## Local validation
+
+`npm test`, `npm run typecheck`, and `npm run build` run the regression suite, check types, and build the plugin. `npm run test:browser` opens an isolated browser against a local fixture to verify Cookie access and cleanup.
+
+`npm run test:desktop-compat` uses an installed Desktop's real runtime with an isolated profile. It checks plugin admission, credential writes and reads, Cookie validation, portfolio selection, and P&L routes. Ledger responses come from a local fixture; no real account or existing DSH configuration is used. The default paths target a standard Windows installation; override them with `DSH_DESKTOP_EXECUTABLE` and `DSH_DESKTOP_RESOURCES` for other locations. Run the test script directly with `--serve` to keep it available for UI checks. Test directories live under `dist/desktop-compat-*`. Real ledger sign-in and holdings still require account-level verification.
 
 ## License
 
