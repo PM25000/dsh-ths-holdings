@@ -10,7 +10,7 @@
 
 English | [中文](README.zh.md)
 
-A floating **position P&L card** for the [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH) web GUI. It automatically syncs your **real portfolio data** from the [Tonghuashun investment-ledger](https://tzzb.10jqka.com.cn) (同花顺投资账本) — no manual stock picking. Displays **今日盈亏** (today's P&L), **上证指数** (Shanghai Composite Index), and an intraday mini chart, all in the A-share red-up/green-down convention.
+A floating **position P&L card** for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH) Desktop and Web. It automatically syncs your **real portfolio data** from the [Tonghuashun investment-ledger](https://tzzb.10jqka.com.cn) (同花顺投资账本) — no manual stock picking. Displays **今日盈亏** (today's P&L), **上证指数** (Shanghai Composite Index), and an intraday mini chart, all in the A-share red-up/green-down convention.
 
 Unlike watchlist tools, this plugin reads your **actual positions** and shows your **real profit & loss** — both as a percentage and as a yuan amount — updating every 20 seconds.
 
@@ -18,41 +18,38 @@ Unlike watchlist tools, this plugin reads your **actual positions** and shows yo
 
 ![dsh-ths-holdings card](assets/screenshot.png)
 
-## Installation
+## Version compatibility
 
 Plugin **0.2.1** targets the DSH **0.2 series** and has been tested with Desktop **0.2.0-rc.2**, without a compatibility exemption. For DSH 0.1, keep plugin **0.2.0**; this migration does not support the older host.
+
+## Installation
+
+### Desktop
+
+1. Open DSH Desktop and select **Plugins** in the sidebar.
+2. Select **Add plugin** and enter `dsh-ths-holdings` in the package field.
+3. Confirm that you trust the plugin as prompted, then select **Install**.
+4. When installation finishes, select **Enable now**. The floating card appears at the bottom-right corner. If a restart is requested, fully quit Desktop and reopen it.
+
+Desktop does not currently update plugins automatically. To upgrade an installed version, uninstall it from the Plugins page, then install the new version. See the [official DSH installation guide](https://github.com/deepseek-ai/deepseek-harness/blob/master/packages/client/ui-plugin-manager/README.md#installing-a-bundle).
+
+### Web
+
+Run in a terminal:
 
 ```sh
 dsh plugin --profile web add dsh-ths-holdings
 ```
 
-Installation is `pnpm add` inside your web profile: the package's `dsh.bundle.patch` is applied to the profile layer automatically. Then **restart `dsh web`** — a floating card appears at the bottom-right corner.
+After installation, **restart `dsh web`** and refresh the DSH page. The floating card appears at the bottom-right corner.
 
-To install manually (without `dsh plugin`), edit `$DSH_HOME/profiles/web/package.json`:
-
-```jsonc
-{
-  "dependencies": {
-    "dsh-ths-holdings": "^0.2.1"
-  },
-  "dsh": {
-    "profile": {
-      "bundles": [
-        // ...existing bundles,
-        "dsh-ths-holdings"
-      ]
-    }
-  }
-}
-```
-
-then `cd $DSH_HOME/profiles/web && pnpm install` and restart `dsh web`. The plugin row itself comes from the package's `cordis.patch.yml` — you don't write it by hand.
+Desktop and Web manage their plugins separately; use the installation method for the application you run.
 
 ## Usage
 
 **Recommended — auto-acquire:**
 
-1. Open the DSH web GUI — click **⚙** on the card.
+1. Open DSH Desktop or Web and click **⚙** on the card.
 2. Click **🖥 自动获取 Cookie（推荐）** — a system browser window opens (Edge / Chrome — the first installed one wins).
 3. Sign in to the Tonghuashun investment ledger in that window (QR code / account).
 4. When the sign-in succeeds the window closes itself, the Cookie is saved automatically, and the card refreshes with your portfolio.
@@ -70,7 +67,7 @@ Manual saves are unavailable while automatic login is starting or running; cance
 2. **Click the browser's top-right menu → More tools → Developer tools** (`…` in Edge, `⋮` in Chrome). F12 may have no effect on this page; open the tools through the browser menu.
 3. **Keep developer tools open**, select **Network**, then refresh the ledger page to record requests.
 4. Select a page or ledger API request to **`tzzb.10jqka.com.cn`**. Under **Headers → Request Headers**, copy the complete **Cookie** value. Copy only the `name=value; name2=value2` portion, without the `Cookie:` prefix; do not copy a response's `Set-Cookie` header.
-5. Return to the DSH web GUI — click **⚙**, paste the cookie into **STOCK_PNL_COOKIE** → **save**.
+5. Return to DSH Desktop or Web — click **⚙**, paste the cookie into **STOCK_PNL_COOKIE** → **save**.
 6. The card validates the saved cookie immediately — it shows **✓ valid** or **✗ invalid** (with the reason/hint).
 
 If the page reports that developer tools are unsupported, first check whether Network has already recorded a ledger request with a Cookie header. If no usable Cookie is available, use auto-acquire above. Keep developer tools open while inspecting cookies manually.

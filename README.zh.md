@@ -9,7 +9,7 @@
 
 [English](README.md) | 中文
 
-[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（DSH）网页 GUI 上的**持仓盈亏悬浮卡片**。自动从[同花顺投资账本](https://tzzb.10jqka.com.cn)同步你的**真实持仓数据**——无需手动添加股票。实时显示**今日盈亏**、**上证指数**和当日分时走势图，遵循 A 股红涨绿跌惯例。
+[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（DSH）桌面端与网页端上的**持仓盈亏悬浮卡片**。自动从[同花顺投资账本](https://tzzb.10jqka.com.cn)同步你的**真实持仓数据**——无需手动添加股票。实时显示**今日盈亏**、**上证指数**和当日分时走势图，遵循 A 股红涨绿跌惯例。
 
 与自选股盯盘工具不同，这个插件读取的是你的**真实持仓**，显示**真实盈亏**——百分比和金额都支持——每 20 秒自动刷新。
 
@@ -17,41 +17,38 @@
 
 ![dsh-ths-holdings 卡片](assets/screenshot.png)
 
-## 安装
+## 版本兼容性
 
 插件 **0.2.1** 适配 DSH **0.2 系列**，已在 Desktop **0.2.0-rc.2** 验证加载与运行，无需版本兼容性豁免。DSH 0.1 系列请保留旧插件 **0.2.0**；本次适配不支持旧宿主。
+
+## 安装
+
+### 桌面端
+
+1. 打开 DSH 桌面端，在左侧栏点击 **插件**。
+2. 点击 **添加插件**，在包名输入框填写 `dsh-ths-holdings`。
+3. 按提示确认信任该插件，点击 **安装**。
+4. 安装完成后点击 **立即启用**，右下角出现悬浮卡片；如果提示需要重启，请完全退出桌面端后重新打开。
+
+桌面端目前不支持插件自动更新。已安装旧版时，请先在插件页卸载，再安装新版。详见 [DSH 官方插件安装说明](https://github.com/deepseek-ai/deepseek-harness/blob/master/packages/client/ui-plugin-manager/README.zh.md#安装一个组合包)。
+
+### 网页端
+
+在终端执行：
 
 ```sh
 dsh plugin --profile web add dsh-ths-holdings
 ```
 
-安装实际上是在 web profile 里执行 `pnpm add`：包的 `dsh.bundle.patch` 会自动并入 profile 层。然后**重启 `dsh web`**，右下角出现悬浮卡片。
+安装完成后**重启 `dsh web`** 并刷新 DSH 页面，右下角出现悬浮卡片。
 
-不用 `dsh plugin` 手动安装：编辑 `$DSH_HOME/profiles/web/package.json`：
-
-```jsonc
-{
-  "dependencies": {
-    "dsh-ths-holdings": "^0.2.1"
-  },
-  "dsh": {
-    "profile": {
-      "bundles": [
-        // ...原有 bundles，
-        "dsh-ths-holdings"
-      ]
-    }
-  }
-}
-```
-
-然后 `cd $DSH_HOME/profiles/web && pnpm install` 并重启 `dsh web`。插件行由包的 `cordis.patch.yml` 提供，不需要手写。
+桌面端和网页端分别管理各自的插件；请按使用的端选择安装方式。
 
 ## 使用
 
 **推荐方式（自动获取）**：
 
-1. 打开 DSH 网页 GUI，点击卡片上的 **⚙**。
+1. 打开 DSH 桌面端或网页端，点击卡片上的 **⚙**。
 2. 点击 **🖥 自动获取 Cookie（推荐）**——会弹出系统浏览器窗口（Edge / Chrome，自动选择已安装者）。
 3. 在弹出的窗口里完成同花顺投资账本登录（扫码 / 账号密码）。
 4. 登录成功后窗口自动关闭，Cookie 自动保存，卡片立即刷新并显示你的持仓。
@@ -69,7 +66,7 @@ dsh plugin --profile web add dsh-ths-holdings
 2. **用鼠标点击浏览器右上角菜单 → 更多工具 → 开发者工具**（Edge 为 `…`，Chrome 为 `⋮`）。本页按 F12 可能无反应，请从浏览器菜单打开。
 3. **保持开发者工具打开**，切换到 **网络 / Network**，然后刷新投资账本页面，让工具记录请求。
 4. 在请求列表中选择发往 **`tzzb.10jqka.com.cn`** 的页面或账本接口请求，展开 **标头 / Headers → 请求标头 / Request Headers**，找到 **Cookie**，复制它的完整值。只复制 `name=value; name2=value2` 这部分，不要带 `Cookie:` 前缀，也不要复制响应中的 `Set-Cookie`。
-5. 回到 DSH 网页 GUI，点击卡片上的 **⚙**，把 Cookie 粘贴进 **STOCK_PNL_COOKIE** → **保存**。
+5. 回到 DSH 桌面端或网页端，点击卡片上的 **⚙**，把 Cookie 粘贴进 **STOCK_PNL_COOKIE** → **保存**。
 6. 保存后卡片会当场校验 Cookie——显示 **✓ 有效** 或 **✗ 无效**（无效会给出原因与提示）。
 
 如果网页出现「当前页面不支持开发者工具」，可先查看 Network 中已记录的本站请求是否带有 Cookie；没有可复制的 Cookie 时，改用上面的自动获取。手动查看 Cookie 时需要保持开发者工具打开。
