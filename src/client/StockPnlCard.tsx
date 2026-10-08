@@ -65,16 +65,16 @@ function colorClass(n: number): string {
   return ''
 }
 
-/** Format the P&L value: percentage only, or both amount and percentage. */
-function formatPnl(pct: number, yk: number, showAmount: boolean): string {
-  if (showAmount) {
-    const amount = yk > 0 ? `¥+${yk.toFixed(2)}` : yk < 0 ? `¥${yk.toFixed(2)}` : '¥0.00'
-    const percent = pct > 0 ? `+${pct.toFixed(2)}%` : pct < 0 ? `${pct.toFixed(2)}%` : '0.00%'
-    return `${amount} (${percent})`
-  }
-  if (pct > 0) return `+${pct.toFixed(2)}%`
-  if (pct < 0) return `${pct.toFixed(2)}%`
-  return '0.00%'
+/** Keep each numeric value together, with a deliberate wrap between amount and percentage. */
+function PnlValue({ pct, yk, showAmount, offline }: { pct: number; yk: number; showAmount: boolean; offline: boolean }): ReactNode {
+  const percent = pct > 0 ? `+${pct.toFixed(2)}%` : pct < 0 ? `${pct.toFixed(2)}%` : '0.00%'
+  if (offline) return <span className={css.pnlPart}>--</span>
+  if (!showAmount) return <span className={css.pnlPart}>{percent}</span>
+  const amount = yk > 0 ? `¥+${yk.toFixed(2)}` : yk < 0 ? `¥${yk.toFixed(2)}` : '¥0.00'
+  return <>
+    <span className={css.pnlPart}>{amount}</span>{' '}
+    <span className={clsx(css.pnlPart, css.pnlPercent)}>({percent})</span>
+  </>
 }
 
 /** Render the ISO `updated_at` as local HH:MM:SS (the raw ISO reads as a changing technical value). */
@@ -395,7 +395,7 @@ export function StockPnlCard({ onSaveCookie, onSaveFundKey }: StockPnlInjected):
         title="点击展开"
       >
         <span className={css.pillLabel}>今日盈亏</span>
-        <span className={css.pillValue}>{offline ? '--' : formatPnl(pnl, yk, showAmount)}</span>
+        <span className={clsx(css.pillValue, css.pnlValue)}><PnlValue pct={pnl} yk={yk} showAmount={showAmount} offline={offline} /></span>
       </button>
     )
   }
@@ -417,9 +417,8 @@ export function StockPnlCard({ onSaveCookie, onSaveFundKey }: StockPnlInjected):
           aria-label="收起今日盈亏"
           title="点击收起"
         >
-          <span className={css.collapseHint}>▾</span>
-          <span>今日盈亏</span>
-          <span className={clsx(css.value, colorClass(pnlSign) === 'up' && css.up, colorClass(pnlSign) === 'down' && css.down)}>{offline ? '--' : formatPnl(pnl, yk, showAmount)}</span>
+          <span className={css.headerLabel}><span className={css.collapseHint}>▾</span>今日盈亏</span>
+          <span className={clsx(css.value, css.pnlValue, colorClass(pnlSign) === 'up' && css.up, colorClass(pnlSign) === 'down' && css.down)}><PnlValue pct={pnl} yk={yk} showAmount={showAmount} offline={offline} /></span>
         </button>
         <button
           type="button"
