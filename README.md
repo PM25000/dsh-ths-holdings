@@ -20,7 +20,7 @@ Unlike watchlist tools, this plugin reads your **actual positions** and shows yo
 
 ## Version compatibility
 
-Plugin **0.2.1** targets the DSH **0.2 series** and has been tested with Desktop **0.2.0-rc.2**, without a compatibility exemption. For DSH 0.1, keep plugin **0.2.0**; this migration does not support the older host.
+Plugin **0.2.2** targets the DSH **0.2 series** and has been tested with Desktop **0.2.0-rc.2**, without a compatibility exemption. For DSH 0.1, keep plugin **0.2.0**; this migration does not support the older host.
 
 ## Installation
 
