@@ -24,6 +24,7 @@
 
 .collapsed {
   flex-direction: row;
+  flex-wrap: wrap;
   align-items: center;
   gap: 10px;
   min-width: 0;
@@ -36,15 +37,15 @@
 
 .header {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 8px;
 }
 
 .headerMain {
   display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  gap: 16px;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
   flex: 1;
   min-width: 0;
   padding: 0;
@@ -56,6 +57,14 @@
   touch-action: none;
   user-select: none;
   text-align: left;
+}
+
+.headerLabel {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+  white-space: nowrap;
 }
 
 .collapseHint {
@@ -192,6 +201,8 @@
 }
 
 .pillLabel {
+  flex: none;
+  white-space: nowrap;
   font-size: 13px;
   opacity: 0.7;
 }
@@ -216,6 +227,26 @@
 .value {
   font-size: 20px;
   font-weight: 700;
+}
+
+.pnlValue {
+  display: flex;
+  flex: 1 1 max-content;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: flex-end;
+  gap: 2px 8px;
+  min-width: 0;
+}
+
+.pnlPart {
+  max-width: 100%;
+  /* Break only when one number exceeds the entire available row. */
+  overflow-wrap: break-word;
+}
+
+.pnlPercent {
+  font-size: 0.75em;
 }
 
 .small {
