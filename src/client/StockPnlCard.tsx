@@ -256,8 +256,8 @@ export function StockPnlCard({ onSaveCookie, onSaveFundKey }: StockPnlInjected):
         const list = (await resp.json()) as readonly PortfolioInfo[]
         if (disposed) return
         setPortfolios(list)
-        // Auto-select the first portfolio when none has been stored yet.
-        if (list.length > 0 && !localStorage.getItem('stock-pnl-fund-key')) {
+        // Multiple portfolios require an explicit choice, including on the first panel open.
+        if (list.length === 1 && !localStorage.getItem('stock-pnl-fund-key')) {
           const first = list[0]!
           await onSaveFundKey(first.fund_key)
           setPortfolioFundKey(first.fund_key)

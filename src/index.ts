@@ -84,9 +84,19 @@ function resolveConfig(config: Config): ResolvedConfig {
 }
 
 /** Resolve one credential-reference value through the seam; `undefined` when unconfigured. */
-async function resolveCredential(ctx: Context, ref: string): Promise<string | undefined> {
-  const resolved = await ctx.credentials.resolve(credentialRef(ref))
-  return resolved?.value
+async function resolveCredential(ctx: Context, ref: string, signal?: AbortSignal): Promise<string | undefined> {
+  if (!signal) return (await ctx.credentials.resolve(credentialRef(ref)))?.value
+  signal.throwIfAborted()
+  let cancel!: () => void
+  const aborted = new Promise<never>((_resolve, reject) => {
+    cancel = () => reject(signal.reason)
+    signal.addEventListener('abort', cancel, { once: true })
+  })
+  try {
+    const resolved = await Promise.race([ctx.credentials.resolve(credentialRef(ref)), aborted])
+    signal.throwIfAborted()
+    return resolved?.value
+  } finally { signal.removeEventListener('abort', cancel) }
 }
 
 /** The web server's response type, derived from the route contract (no node import). */
@@ -125,7 +135,9 @@ export function apply(ctx: Context, config: Config = {}): void {
     path: ROUTE_PATH,
     handler: async (_req, res) => {
       try {
-        const cookie = await resolveCredential(ctx, spec.cookieEnv)
+        // One deadline covers credentials, optional discovery and both quote requests.
+        const signal = AbortSignal.timeout(spec.requestTimeoutMs)
+        const cookie = await resolveCredential(ctx, spec.cookieEnv, signal)
 
         // Derive the ledger user id (same fallback as collectStats) so we can
         // call the account_list API when fund_key has not yet been stored.
@@ -138,10 +150,10 @@ export function apply(ctx: Context, config: Config = {}): void {
           : (cookieField(normalizeCookie(cookie ?? ''), 'userid') ?? '')
 
         // fund_key: saved credential → config default → sole available account
-        const fundKeyCred = await resolveCredential(ctx, spec.fundKeyEnv)
+        const fundKeyCred = await resolveCredential(ctx, spec.fundKeyEnv, signal)
         let fundKey = fundKeyCred ?? spec.fund_key
         if (!fundKey && cookie && resolvedUser) {
-          const result = await ledger.list(new AbortController().signal)
+          const result = await ledger.list(signal)
           if (result.data === null) throw new Error(result.code)
           const accounts = result.data.portfolios
           if (accounts.length !== 1) {
@@ -159,6 +171,7 @@ export function apply(ctx: Context, config: Config = {}): void {
           cookieEnv: spec.cookieEnv,
           user_id: spec.user_id,
           fund_key: fundKey,
+          signal,
           requestTimeoutMs: spec.requestTimeoutMs,
         })
         writeJson(res, 200, { ...stats, poll_ms: spec.pollMs })
