@@ -94,6 +94,10 @@ For example, say:
 
 > Every weekday at 4:30 p.m. Beijing time, check my holdings in Tonghuashun Investment Ledger and generate a holdings and P&L report. Keep this task linked to the currently selected portfolio.
 
+You can also include relevant news:
+
+> Every weekday at 9:00 a.m., check my holdings in Tonghuashun Investment Ledger and tell me about important news related to those holdings.
+
 Have the assistant confirm the portfolio name and next run time. Scheduled reports require a running DSH host with Schedule enabled. Weekday rules do not automatically exclude exchange holidays.
 
 ## Features
