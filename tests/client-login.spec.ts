@@ -22,18 +22,21 @@ function deferred<T>() {
   return { promise, resolve }
 }
 
-async function card(t: TestContext, options: { showAmount?: boolean; pct?: number; yk?: number; offline?: boolean } = {}) {
+async function card(t: TestContext, options: { showAmount?: boolean; pct?: number; yk?: number; offline?: boolean; error?: string } = {}) {
   const stored = new Map([['stock-pnl-fund-key', 'old-fund']])
   if (options.showAmount) stored.set('stock-pnl-show-amount', 'true')
   const intervals = new Map<number, () => void>()
+  const timeouts = new Map<number, () => void>()
   const statuses: Promise<AcquireStatusView>[] = []
-  const verifications: Promise<{ configured: boolean; valid: boolean; error?: string }>[] = []
+  const verifications: Promise<{ configured: boolean; valid: boolean; error?: string; reason?: string }>[] = []
   const calls: string[] = []
   const fundWrites: string[] = []
   let timer = 0
   const host = {
     status: { state: 'idle' } as AcquireStatusView,
     fund: 'old-fund',
+    snapshotError: options.error ?? '', snapshotOffline: options.offline ?? false,
+    snapshotTime: '2026-09-23T00:00:00Z', indexUnavailable: false,
     valid: undefined as boolean | undefined,
     startReply: undefined as Promise<AcquireStatusView> | undefined,
     save: async () => {},
@@ -51,8 +54,8 @@ async function card(t: TestContext, options: { showAmount?: boolean; pct?: numbe
       case '/api/stock-pnl/verify': value = verifications.shift() ?? { configured: true, valid: host.valid ?? host.status.state === 'saved' }; break
       case '/api/stock-pnl/portfolios': value = [{ fund_key: host.fund, manualname: 'test', brokername: 'test' }]; break
       case '/api/stock-pnl':
-        if (options.offline) throw new Error('offline')
-        value = { pnl_pct: options.pct ?? 0, pnl_yk: options.yk ?? 0, sh_pct: 0, chart_data: [], updated_at: '2026-09-23T00:00:00Z', error: '', token_expired: false, poll_ms: 20_000 }
+        if (host.snapshotOffline) throw new Error('offline')
+        value = { pnl_pct: options.pct ?? 0, pnl_yk: options.yk ?? 0, sh_pct: 0, chart_data: [], updated_at: host.snapshotTime, error: host.snapshotError, index_unavailable: host.indexUnavailable, token_expired: false, poll_ms: 20_000 }
         break
       default: assert.fail(`unexpected request: ${url}`)
     }
@@ -68,7 +71,7 @@ async function card(t: TestContext, options: { showAmount?: boolean; pct?: numbe
       removeItem: (key: string) => stored.delete(key),
     },
     window: { setInterval: (callback: () => void) => { intervals.set(++timer, callback); return timer }, clearInterval: (id: number) => intervals.delete(id) },
-    setTimeout: () => ++timer, clearTimeout: () => {},
+    setTimeout: (callback: () => void) => { timeouts.set(++timer, callback); return timer }, clearTimeout: (id: number) => timeouts.delete(id),
   })
   evaluate((id: string) => id.endsWith('.css')
     ? { __esModule: true, default: new Proxy({}, { get: (_target, key) => key }) }
@@ -83,6 +86,8 @@ async function card(t: TestContext, options: { showAmount?: boolean; pct?: numbe
   t.after(async () => { await act(async () => renderer.unmount()) })
   return {
     host, stored, calls, fundWrites, statuses, verifications,
+    footer: () => renderer.root.findByProps({ className: 'footer' }).children.join(''),
+    poll: () => act(async () => { const pending = [...timeouts.values()]; timeouts.clear(); for (const callback of pending) callback() }),
     text: () => JSON.stringify(renderer.toJSON()),
     pnlParts: () => renderer.root.findAllByType('span')
       .filter(node => node.props.className?.split(' ').includes('pnlPart'))
@@ -278,5 +283,41 @@ describe('login completion in the settings card', () => {
     await act(async () => { oldVerification.resolve({ configured: true, valid: false }) })
     assert.match(h.text(), /✓ 有效/)
     assert.doesNotMatch(h.text(), /✗ 无效/)
+  })
+})
+
+
+describe('previous successful card values during temporary failure', () => {
+  it('preserves values and the original timestamp across repeated failures, then resumes fresh data', async t => {
+    const h = await card(t, { showAmount: true, pct: 2.5, yk: 100 })
+    const before = h.pnlParts(), updated = h.footer()
+    h.host.snapshotError = '数据暂时无法获取，稍后自动重试'; h.host.snapshotTime = '2026-09-23T01:00:00Z'
+    await h.poll(); await h.poll()
+    assert.deepEqual(h.pnlParts(), before); assert.equal(h.footer(), updated); assert(!h.text().includes('403'))
+    await h.collapse(); assert.deepEqual(h.pnlParts(), before); await h.expand()
+    h.host.snapshotError = ''; h.host.indexUnavailable = true; await h.poll()
+    assert.deepEqual(h.pnlParts(), before); assert.equal(h.footer(), updated)
+    h.host.indexUnavailable = false; await h.poll()
+    assert.notEqual(h.footer(), updated); assert(!h.text().includes('数据暂时无法获取'))
+  })
+  it('retains the same previous values for a host connection failure', async t => {
+    const h = await card(t, { pct: 2.5 })
+    const before = h.pnlParts(), updated = h.footer()
+    h.host.snapshotOffline = true; await h.poll()
+    assert.deepEqual(h.pnlParts(), before); assert.equal(h.footer(), updated)
+  })
+  it('clears previous values when switching portfolios and uses a placeholder when no success exists', async t => {
+    const h = await card(t, { pct: 2.5 })
+    h.host.snapshotError = '数据暂时无法获取，稍后自动重试'
+    await h.toggle(); await h.select('new-portfolio')
+    assert.deepEqual(h.pnlParts(), ['--']); assert(!h.text().includes('+2.50%'))
+    const empty = await card(t, { error: '数据暂时无法获取，稍后自动重试' })
+    assert.deepEqual(empty.pnlParts(), ['--'])
+  })
+  it('shows temporary verification failure without labelling the Cookie invalid', async t => {
+    const h = await card(t)
+    h.verifications.push(Promise.resolve({ configured: true, valid: false, reason: 'blocked', error: '暂时无法验证登录状态，请稍后重试' }))
+    await h.toggle()
+    assert(h.text().includes('稍后重试')); assert(!h.text().includes('✗ 无效'))
   })
 })

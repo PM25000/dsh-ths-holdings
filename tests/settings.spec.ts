@@ -15,6 +15,9 @@ async function host(fail = false, beforeSave?: () => Promise<void>) {
   const routes = new Map<string, WebRoute>()
   const disposers: Array<() => void | Promise<void>> = []
   const mount = () => apply({
+    inject: () => {},
+    get: () => undefined,
+    logger: { warn: () => {} },
     credentials: {
       set: async (ref: string, value: string) => {
         await beforeSave?.()

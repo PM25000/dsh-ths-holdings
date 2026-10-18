@@ -22,11 +22,15 @@ interface Snapshot {
   updated_at: string
   error: string
   token_expired: boolean
+  index_unavailable?: boolean
+  /** Local presentation only: previous successful values retain their original timestamp. */
+  stale?: boolean
   poll_ms: number
 }
 
 /** The `/api/stock-pnl/verify` payload subset the card renders. */
 interface VerifyView {
+  reason?: string
   configured: boolean
   valid: boolean
   error?: string
@@ -171,6 +175,8 @@ export function StockPnlCard({ onSaveCookie, onSaveFundKey }: StockPnlInjected):
 
   /** The inline style that pins the card to a dragged `top`; `undefined` uses the CSS default. */
   const cardStyle = top === null ? undefined : { top: `${top}px`, bottom: 'auto' }
+  const unavailable = offline || snapshot === null || snapshot.error !== '' && !snapshot.stale
+  const indexUnavailable = unavailable || snapshot?.index_unavailable === true
 
   useEffect(() => {
     mounted.current = true
@@ -180,6 +186,10 @@ export function StockPnlCard({ onSaveCookie, onSaveFundKey }: StockPnlInjected):
   useEffect(() => {
     let disposed = false
     let timer: ReturnType<typeof setTimeout> | undefined
+    let lastGood: Snapshot | null = null
+    // A new refresh generation follows a credential/portfolio change: never reuse the old account.
+    setSnapshot(null)
+    setOffline(false)
     const tick = async (): Promise<void> => {
       let interval = DEFAULT_POLL_MS
       try {
@@ -188,11 +198,19 @@ export function StockPnlCard({ onSaveCookie, onSaveFundKey }: StockPnlInjected):
         const next = (await response.json()) as Snapshot
         if (disposed) return
         interval = Number.isFinite(next.poll_ms) && next.poll_ms > 0 ? next.poll_ms : DEFAULT_POLL_MS
-        setSnapshot(next)
+        if (next.error === '' && !next.index_unavailable) {
+          lastGood = next
+          setSnapshot(next)
+        } else {
+          setSnapshot(lastGood ? { ...lastGood, stale: true, error: next.error || '指数暂未更新，显示上次数据', token_expired: next.token_expired, poll_ms: next.poll_ms } : next)
+        }
         setOffline(false)
       } catch {
         if (disposed) return
-        setOffline(true)
+        if (lastGood) {
+          setSnapshot({ ...lastGood, stale: true, error: '暂时无法更新，显示上次数据' })
+          setOffline(false)
+        } else setOffline(true)
       }
       if (!disposed) timer = setTimeout(() => { void tick() }, interval)
     }
@@ -392,10 +410,10 @@ export function StockPnlCard({ onSaveCookie, onSaveFundKey }: StockPnlInjected):
         onPointerUp={endDrag}
         onPointerCancel={endDrag}
         aria-label="展开今日盈亏"
-        title="点击展开"
+        title={snapshot?.stale ? '显示上次数据，请展开查看更新时间' : '点击展开'}
       >
         <span className={css.pillLabel}>今日盈亏</span>
-        <span className={clsx(css.pillValue, css.pnlValue)}><PnlValue pct={pnl} yk={yk} showAmount={showAmount} offline={offline} /></span>
+        <span className={clsx(css.pillValue, css.pnlValue)}><PnlValue pct={pnl} yk={yk} showAmount={showAmount} offline={unavailable} /></span>
       </button>
     )
   }
@@ -418,7 +436,7 @@ export function StockPnlCard({ onSaveCookie, onSaveFundKey }: StockPnlInjected):
           title="点击收起"
         >
           <span className={css.headerLabel}><span className={css.collapseHint}>▾</span>今日盈亏</span>
-          <span className={clsx(css.value, css.pnlValue, colorClass(pnlSign) === 'up' && css.up, colorClass(pnlSign) === 'down' && css.down)}><PnlValue pct={pnl} yk={yk} showAmount={showAmount} offline={offline} /></span>
+          <span className={clsx(css.value, css.pnlValue, colorClass(pnlSign) === 'up' && css.up, colorClass(pnlSign) === 'down' && css.down)}><PnlValue pct={pnl} yk={yk} showAmount={showAmount} offline={unavailable} /></span>
         </button>
         <button
           type="button"
@@ -436,11 +454,11 @@ export function StockPnlCard({ onSaveCookie, onSaveFundKey }: StockPnlInjected):
             <label className={css.settingsLabel} htmlFor="stock-pnl-cookie">STOCK_PNL_COOKIE</label>
             {verify !== null && (
               <span
-                className={clsx(css.badge, !verify.configured ? css.badgeMuted : verify.valid ? css.badgeOk : css.badgeBad)}
+                className={clsx(css.badge, !verify.configured || verify.reason === 'blocked' ? css.badgeMuted : verify.valid ? css.badgeOk : css.badgeBad)}
                 role="status"
                 title={verify.error ?? (verify.configured ? 'Cookie 已通过账本校验' : '尚未配置 Cookie')}
               >
-                {!verify.configured ? '未配置' : verify.valid ? '✓ 有效' : '✗ 无效'}
+                {!verify.configured ? '未配置' : verify.reason === 'blocked' ? '稍后重试' : verify.valid ? '✓ 有效' : '✗ 无效'}
               </span>
             )}
           </div>
@@ -550,10 +568,10 @@ export function StockPnlCard({ onSaveCookie, onSaveFundKey }: StockPnlInjected):
         </div>
       )}
 
-      {offline ? <div className={css.error}>连接中...</div> : <MiniChart data={snapshot?.chart_data ?? []} last={pnl} />}
+      {offline ? <div className={css.error}>连接中...</div> : unavailable ? null : <MiniChart data={snapshot?.chart_data ?? []} last={pnl} />}
       <div className={css.row}>
         <span className={css.label}>上证指数</span>
-        <span className={clsx(css.value, css.small, colorClass(sh) === 'up' && css.up, colorClass(sh) === 'down' && css.down)}>{offline ? '--' : signed(sh)}</span>
+        <span className={clsx(css.value, css.small, colorClass(sh) === 'up' && css.up, colorClass(sh) === 'down' && css.down)}>{indexUnavailable ? '--' : signed(sh)}</span>
       </div>
       {snapshot !== null && snapshot.token_expired && <div className={css.alert}>Token 已过期，请更新 Cookie</div>}
       {snapshot !== null && snapshot.error !== '' && (

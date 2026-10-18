@@ -32,7 +32,7 @@ function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
 }
 
-const PNL_BODY = { error_code: '0', ex_data: { data: [{ time: 1, zf: -1.0 }, { time: 2, zf: 2.5 }] } }
+const PNL_BODY = { error_code: '0', ex_data: { data: [{ time: 1, zf: -1.0, yk: -40 }, { time: 2, zf: 2.5, yk: 100 }] } }
 const INDEX_BODY = {
   error_code: '0',
   ex_data: [
@@ -82,7 +82,7 @@ describe('collectStats', () => {
   it('flags an HTTP 401 as token expiry', async () => {
     const stats = await collectStats({ ...base, fetchImpl: async () => new Response('', { status: 401 }) })
     assert.equal(stats.token_expired, true)
-    assert.ok((stats.error)?.includes('TOKEN_EXPIRED'))
+    assert.ok((stats.error)?.includes('登录状态已失效'))
   })
 
   it('derives the ledger user id from the Cookie when user_id is empty', async () => {
@@ -245,7 +245,7 @@ describe('verifyCookie', () => {
     assert.equal(result.reason, 'no-userid')
   })
 
-  it('flags HTTP 401/403 as expired with a re-login hint', async () => {
+  it('flags HTTP 401 as expired with a re-login hint', async () => {
     const fetchImpl: FetchLike = async (_url, init) => {
       assert.equal(init.redirect, 'manual')
       return new Response('', { status: 401 })
@@ -270,12 +270,13 @@ describe('verifyCookie', () => {
     assert.deepEqual(result.portfolios, [{ fund_key: 'k1', manualname: '组合A', brokername: '华泰' }])
   })
 
-  it('reports a rejected envelope with the ledger message', async () => {
-    const fetchImpl: FetchLike = async () => jsonResponse({ error_code: '1', error_msg: '需要登录' })
+  it('reports business rejection without echoing upstream content', async () => {
+    const fetchImpl: FetchLike = async () => jsonResponse({ error_code: '1', error_msg: '需要登录 private-cookie-value' })
     const result = await verifyCookie('userid=u042; sid=abc', undefined, fetchImpl)
     assert.equal(result.valid, false)
     assert.equal(result.reason, 'rejected')
-    assert.ok((result.error)?.includes('需要登录'))
+    assert.ok((result.error)?.includes('账本拒绝请求'))
+    assert(!JSON.stringify(result).includes('private-cookie-value'))
     assert.ok((result.hint)?.includes('重新登录'))
   })
 })
@@ -301,5 +302,68 @@ describe('real Loader composition', () => {
     assert.ok((ledgerCookie)?.includes('sid=test-secret'))
 
     assert.equal((await fetch(`http://127.0.0.1:${String(port)}/no/such/route`)).status, 404)
+  })
+})
+
+
+describe('card gateway recovery', () => {
+  const base = { pnlUrl: 'https://ledger.test/pnl', indexUrl: 'https://ledger.test/index', cookie: 'userid=test; sid=private', cookieEnv: COOKIE_ENV, user_id: '', fund_key: 'test', now: FIXED_NOW }
+  it('recovers intermittent P&L/index refusals before returning a clean snapshot', async () => {
+    const counts = new Map<string, number>()
+    const stats = await collectStats({ ...base, fetchImpl: async url => {
+      const count = (counts.get(url) ?? 0) + 1; counts.set(url, count)
+      return count < 3 ? new Response('private upstream body', { status: 403 }) : jsonResponse(url.endsWith('/pnl') ? PNL_BODY : INDEX_BODY)
+    } })
+    assert.equal(stats.error, ''); assert.equal(stats.token_expired, false); assert.equal(stats.pnl_pct, 2.5); assert.equal(stats.sh_pct, 1)
+    assert.deepEqual([...counts.values()], [3, 3])
+  })
+  it('keeps a sustained refusal distinct from login expiry and never exposes its body', async () => {
+    let calls = 0
+    const stats = await collectStats({ ...base, fetchImpl: async () => { calls++; return new Response('Nginx forbidden private-cookie', { status: 403 }) } })
+    assert.equal(calls, 3); assert.equal(stats.token_expired, false)
+    assert(stats.error.includes('稍后')); assert(!/403|Nginx|private-cookie/.test(stats.error))
+    const result = await verifyCookie(base.cookie, undefined, async () => new Response('private-cookie', { status: 403 }))
+    assert.equal(result.reason, 'blocked'); assert.equal(result.valid, false); assert(!result.hint?.includes('重新登录'))
+  })
+  it('marks an unavailable index rather than reporting a false zero', async () => {
+    const result = await collectStats({ ...base, requestTimeoutMs: 50, fetchImpl: async url => url.endsWith('/pnl') ? jsonResponse(PNL_BODY) : new Response('', { status: 403 }) })
+    assert.equal(result.error, ''); assert.equal(result.index_unavailable, true); assert.equal(result.pnl_pct, 2.5)
+  })
+})
+
+
+describe('card response validation', () => {
+  const base = { pnlUrl: 'https://ledger.test/pnl', indexUrl: 'https://ledger.test/index', cookie: 'userid=fixture; sid=private', cookieEnv: COOKIE_ENV, user_id: '', fund_key: 'fixture', now: FIXED_NOW }
+  it('does not accept an empty or malformed HTTP-success response as a fresh zero snapshot', async () => {
+    for (const body of [null, [], { error_code: '0' }, { error_code: '0', ex_data: { data: [] } },
+      { error_code: '0', ex_data: { data: [null] } },
+      { error_code: '0', ex_data: { data: [{ time: 1, zf: 'NaN', yk: '10' }] } },
+      { error_code: '0', ex_data: { data: [{ time: 1, zf: '2' }] } }]) {
+      const result = await collectStats({ ...base, fetchImpl: async () => jsonResponse(body) })
+      assert.notEqual(result.error, '', JSON.stringify(body))
+      assert.equal(result.token_expired, false)
+    }
+  })
+  it('flags invalid index values while preserving valid P&L', async () => {
+    for (const quote of [{ xianjia: 'NaN', zuoshou: '3000' }, { xianjia: null, zuoshou: '3000' }, { xianjia: '3030', zuoshou: '' }]) {
+      const result = await collectStats({ ...base, fetchImpl: async url => jsonResponse(url.endsWith('/pnl') ? PNL_BODY : { error_code: '0', ex_data: [{ zqdm: '1A0001', ...quote }] }) })
+      assert.equal(result.index_unavailable, true)
+      assert.equal(result.pnl_yk, 100)
+    }
+  })
+  it('keeps business and network diagnostics free of upstream secrets', async () => {
+    const result = await collectStats({ ...base, fetchImpl: async () => jsonResponse({ error_code: '1', error_msg: 'private-cookie-value' }) })
+    assert.notEqual(result.error, '')
+    assert(!JSON.stringify(result).includes('private-cookie-value'))
+    const verification = await verifyCookie(base.cookie, undefined, async () => { throw new Error('private-cookie-value') })
+    assert.equal(verification.valid, false)
+    assert(!JSON.stringify(verification).includes('private-cookie-value'))
+  })
+  it('does not mark malformed account responses as a valid login', async () => {
+    for (const body of [null, {}, { error_code: '0' }, { error_code: '0', ex_data: { common: [null] } }]) {
+      const result = await verifyCookie(base.cookie, undefined, async () => jsonResponse(body))
+      assert.equal(result.valid, false)
+      assert.equal(result.reason, 'parse')
+    }
   })
 })

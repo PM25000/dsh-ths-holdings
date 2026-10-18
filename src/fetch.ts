@@ -7,6 +7,8 @@
  */
 
 import type { ChartPoint, Stats } from './types.ts'
+import { fetchLedger, type FetchLike } from './transport.ts'
+export type { FetchLike } from './transport.ts'
 
 /** The P&L intraday time_share endpoint. */
 export const PNL_URL = 'https://tzzb.10jqka.com.cn/caishen_httpserver/tzzb/caishen_fund/pc/asset/v1/time_share'
@@ -23,9 +25,6 @@ export interface Endpoints {
   readonly pnlUrl: string
   readonly indexUrl: string
 }
-
-/** A fetch-compatible POST executor, injectable so tests supply a scripted response. */
-export type FetchLike = (url: string, init: RequestInit) => Promise<Response>
 
 /** The production executor backed by the global fetch. */
 export const defaultFetch: FetchLike = (url, init) => fetch(url, init)
@@ -66,6 +65,7 @@ async function postForm<T>(
   url: string,
   payload: string,
   cookie: string,
+  signal: AbortSignal,
 ): Promise<PostResult<T>> {
   const headers: Record<string, string> = {
     'Content-Type': 'application/x-www-form-urlencoded',
@@ -77,33 +77,39 @@ async function postForm<T>(
   }
   let response: Response
   try {
-    response = await fetchImpl(url, { method: 'POST', headers, body: payload, redirect: 'manual' })
-  } catch (error) {
-    return { ok: false, tokenExpired: false, error: `网络错误: ${(error as Error).message}` }
+    response = await fetchLedger(fetchImpl, url, { signal, method: 'POST', headers, body: payload, redirect: 'manual' })
+  } catch {
+    return { ok: false, tokenExpired: false, error: '数据暂时无法获取，稍后自动重试' }
   }
   if (REDIRECT_STATUSES.has(response.status)) {
     return { ok: false, tokenExpired: false, error: `接口重定向未跟随 (HTTP ${response.status})` }
   }
-  if (response.status === 401 || response.status === 403) {
-    return { ok: false, tokenExpired: true, error: `TOKEN_EXPIRED (HTTP ${response.status}) ${await bodySnippet(response)}`.trim() }
+  if (response.status === 401) {
+    return { ok: false, tokenExpired: true, error: '登录状态已失效，请在设置中重新登录' }
+  }
+  if (response.status === 403) {
+    return { ok: false, tokenExpired: false, error: '数据暂时无法获取，稍后自动重试' }
   }
   if (!response.ok) {
-    return { ok: false, tokenExpired: false, error: `HTTP ${response.status} ${await bodySnippet(response)}`.trim() }
+    return { ok: false, tokenExpired: false, error: `请求失败 (HTTP ${response.status})` }
   }
   try {
-    return { ok: true, body: (await response.json()) as T }
+    const body: unknown = await response.json()
+    if (!isRecord(body)) throw new Error('Invalid response object')
+    return { ok: true, body: body as T }
   } catch {
     return { ok: false, tokenExpired: false, error: '响应解析失败' }
   }
 }
 
-/** Read a short prefix of a response body for diagnostics; never throws. */
-async function bodySnippet(response: Response): Promise<string> {
-  try {
-    return (await response.text()).slice(0, 200)
-  } catch {
-    return ''
-  }
+/** Reject absent, non-numeric and non-finite values before accepting a card snapshot. */
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+}
+function finiteNumber(value: unknown): number | undefined {
+  if (typeof value !== 'number' && (typeof value !== 'string' || value.trim() === '')) return undefined
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : undefined
 }
 
 /** The P&L time_share form payload. */
@@ -136,16 +142,6 @@ export function cookieField(cookie: string, name: string): string | undefined {
   return match?.[1]
 }
 
-/**
- * Query the portfolio list and return the first account's `fund_key`.
- * Returns `undefined` on any network or parse failure so the caller falls back
- * to a configured default.
- */
-export async function fetchFundKey(cookie: string, user_id: string): Promise<string | undefined> {
-  const list = await listPortfolios(cookie, user_id)
-  return list[0]?.fund_key
-}
-
 /** One portfolio account from the account_list API. */
 export interface Portfolio {
   readonly fund_key: string
@@ -156,7 +152,7 @@ export interface Portfolio {
 /** One verified-Cookie answer (the user-visible verify route payload). */
 export interface VerifyResult {
   readonly valid: boolean
-  readonly reason: 'missing' | 'no-userid' | 'expired' | 'redirected' | 'http' | 'parse' | 'rejected' | 'ok'
+  readonly reason: 'missing' | 'no-userid' | 'expired' | 'blocked' | 'redirected' | 'http' | 'parse' | 'rejected' | 'ok'
   /** Human-readable diagnostics for the invalid case. */
   readonly error?: string
   /** Actionable hint (e.g. re-sign in). */
@@ -183,8 +179,8 @@ function parsePortfolios(body: { ex_data?: { common?: ReadonlyArray<Record<strin
  * Query the portfolio list and return every account. Silently returns `[]` on
  * any network or parse failure so the caller can fall back gracefully.
  * The request shape is byte-identical to verifyCookie's (the same endpoint) —
- * extra browser headers (Accept/Referer/Accept-Language) or a redirect-follow
- * get the account_list gateway refused, while this minimal shape is accepted.
+ * optional browser headers are omitted to preserve the established request
+ * shape. Intermittent gateway rejection is handled by the shared transport.
  * The Cookie is normalized first: the credentials store folds long values
  * across YAML lines and the read inserts a space at each break.
  * @param fetchImpl - executor override for tests; defaults to the global fetch.
@@ -192,7 +188,7 @@ function parsePortfolios(body: { ex_data?: { common?: ReadonlyArray<Record<strin
 export async function listPortfolios(cookie: string, user_id: string, fetchImpl: FetchLike = defaultFetch): Promise<readonly Portfolio[]> {
   const payload = `terminal=1&version=0.0.0&userid=${user_id}&user_id=${user_id}`
   try {
-    const response = await fetchImpl(ACCOUNT_LIST_URL, {
+    const response = await fetchLedger(fetchImpl, ACCOUNT_LIST_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': UA, Cookie: normalizeCookie(cookie) },
       body: payload,
@@ -209,9 +205,9 @@ export async function listPortfolios(cookie: string, user_id: string, fetchImpl:
 
 /**
  * Probe the ledger account-list endpoint with the stored Cookie and report
- * whether it is accepted. A 401/403 means the Cookie expired; a 200 with a
- * rejected envelope means the ledger refused the session; any other failure is
- * reported as-is (the ledger call must not be retried or followed).
+ * whether it is accepted. A 401 means reauthentication is required. Intermittent
+ * 403s recover silently; an exhausted 403 is a temporary rejection, not proof
+ * that the Cookie expired. Redirects and business failures are never replayed.
  * @param cookie - the stored Cookie, or undefined when nothing is configured.
  * @param user_id - explicit user id, or undefined to derive it from the Cookie.
  * @param fetchImpl - executor override for tests.
@@ -232,19 +228,22 @@ export async function verifyCookie(
   }
   let response: Response
   try {
-    response = await fetchImpl(ACCOUNT_LIST_URL, {
+    response = await fetchLedger(fetchImpl, ACCOUNT_LIST_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': UA, Cookie: normalized },
       body: `terminal=1&version=0.0.0&userid=${uid}&user_id=${uid}`,
       redirect: 'manual',
     })
-  } catch (error) {
-    return { valid: false, reason: 'http', error: `网络错误: ${(error as Error).message}` }
+  } catch {
+    return { valid: false, reason: 'http', error: '暂时无法验证登录状态，请稍后重试' }
   }
   if (REDIRECT_STATUSES.has(response.status)) {
     return { valid: false, reason: 'redirected', error: `接口重定向未跟随 (HTTP ${response.status})` }
   }
-  if (response.status === 401 || response.status === 403) {
+  if (response.status === 403) {
+    return { valid: false, reason: 'blocked', error: '暂时无法验证登录状态，请稍后重试', hint: '现有 Cookie 已保留，稍后再次验证' }
+  }
+  if (response.status === 401) {
     return { valid: false, reason: 'expired', error: 'Cookie 已过期（Token 无效），请重新登录获取', hint: '点击「自动获取 Cookie」或重新粘贴' }
   }
   if (!response.ok) {
@@ -252,18 +251,22 @@ export async function verifyCookie(
   }
   let body: { error_code?: string; error_msg?: string; ex_data?: { common?: ReadonlyArray<Record<string, unknown>> } }
   try {
-    body = (await response.json()) as typeof body
+    const decoded: unknown = await response.json()
+    if (!isRecord(decoded) || decoded.error_code === undefined) throw new Error('Invalid response object')
+    body = decoded as typeof body
   } catch {
     return { valid: false, reason: 'parse', error: '响应解析失败' }
   }
-  if (body.error_code !== undefined && body.error_code !== '0') {
-    const message = String(body.error_msg ?? '未知错误')
+  if (String(body.error_code) !== '0') {
     return {
       valid: false,
       reason: 'rejected',
-      error: `账本拒绝请求: ${message}`,
-      hint: message.includes('登录') ? '请重新登录获取新的 Cookie' : undefined,
+      error: '账本拒绝请求，请检查登录和账本设置',
+      hint: String(body.error_msg ?? '').includes('登录') ? '请重新登录获取新的 Cookie' : undefined,
     }
+  }
+  if (!Array.isArray(body.ex_data?.common) || !body.ex_data.common.every(isRecord)) {
+    return { valid: false, reason: 'parse', error: '账本列表格式异常' }
   }
   return { valid: true, reason: 'ok', portfolios: parsePortfolios(body) }
 }
@@ -280,6 +283,8 @@ export interface CollectStatsInput extends Endpoints {
   readonly fund_key: string
   /** Executor override for tests. */
   readonly fetchImpl?: FetchLike
+  /** Overall deadline for this snapshot, including silent recovery. */
+  readonly requestTimeoutMs?: number
   /** Clock override for tests; defaults to `new Date()`. */
   readonly now?: () => Date
 }
@@ -292,6 +297,7 @@ export interface CollectStatsInput extends Endpoints {
 export async function collectStats(input: CollectStatsInput): Promise<Stats> {
   const fetchImpl = input.fetchImpl ?? defaultFetch
   const now = input.now ?? (() => new Date())
+  const signal = AbortSignal.timeout(input.requestTimeoutMs ?? 15_000)
   if (input.cookie === undefined || input.cookie.length === 0) {
     return {
       pnl_pct: 0,
@@ -310,23 +316,29 @@ export async function collectStats(input: CollectStatsInput): Promise<Stats> {
   let shPct = 0
   let error = ''
   let tokenExpired = false
+  let indexUnavailable = false
 
   const cookie = normalizeCookie(input.cookie)
   // The ledger form payload needs the user id; fall back to the Cookie's own
   // `userid` field so the plugin works without a separate `user_id` config.
   const user_id = input.user_id.length > 0 ? input.user_id : (cookieField(cookie, 'userid') ?? '')
 
-  const pnl = await postForm<PnlBody>(fetchImpl, input.pnlUrl, pnlPayload({ user_id, fund_key: input.fund_key }), cookie)
+  const pnl = await postForm<PnlBody>(fetchImpl, input.pnlUrl, pnlPayload({ user_id, fund_key: input.fund_key }), cookie, signal)
   if (pnl.ok) {
-    if (pnl.body.error_code !== '0') {
-      error = String(pnl.body.error_msg ?? 'API 错误')
+    if (String(pnl.body.error_code) !== '0') {
+      error = '账本拒绝请求，请检查登录和账本设置'
     } else {
       const points = pnl.body.ex_data?.data
-      if (points !== undefined && points.length > 0) {
-        const last = points[points.length - 1]
-        pnlPct = Number(last?.zf ?? 0)
-        pnlYk = Number(last?.yk ?? 0)
-        chartData = points.map(point => ({ t: Number(point.time ?? 0), v: Number(point.zf ?? 0) }))
+      if (!Array.isArray(points) || points.length === 0) {
+        error = '暂无可用盈亏数据，稍后自动更新'
+      } else if (!points.every(point => isRecord(point) && finiteNumber(point.time) !== undefined && finiteNumber(point.zf) !== undefined)
+        || finiteNumber(points.at(-1)?.yk) === undefined) {
+        error = '盈亏数据格式异常，稍后自动更新'
+      } else {
+        const last = points.at(-1)!
+        pnlPct = finiteNumber(last.zf)!
+        pnlYk = finiteNumber(last.yk)!
+        chartData = points.map(point => ({ t: finiteNumber(point.time)!, v: finiteNumber(point.zf)! }))
       }
     }
   } else {
@@ -335,13 +347,15 @@ export async function collectStats(input: CollectStatsInput): Promise<Stats> {
   }
 
   if (error === '') {
-    const index = await postForm<IndexBody>(fetchImpl, input.indexUrl, indexPayload({ user_id }), cookie)
-    if (index.ok) {
-      for (const item of index.body.ex_data ?? []) {
+    const index = await postForm<IndexBody>(fetchImpl, input.indexUrl, indexPayload({ user_id }), cookie, signal)
+    indexUnavailable = true
+    if (index.ok && String(index.body.error_code) === '0' && Array.isArray(index.body.ex_data)) {
+      for (const item of index.body.ex_data) {
+        if (!isRecord(item)) continue
         if (item.zqdm !== '1A0001') continue
-        const price = Number(item.xianjia ?? 0)
-        const prev = Number(item.zuoshou ?? 0)
-        if (prev > 0) shPct = Math.round(((price - prev) / prev) * 10000) / 100
+        const price = finiteNumber(item.xianjia)
+        const prev = finiteNumber(item.zuoshou)
+        if (price !== undefined && price > 0 && prev !== undefined && prev > 0) { shPct = Math.round(((price - prev) / prev) * 10000) / 100; indexUnavailable = false }
         break
       }
     }
@@ -355,5 +369,6 @@ export async function collectStats(input: CollectStatsInput): Promise<Stats> {
     updated_at: now().toISOString(),
     error,
     token_expired: tokenExpired,
+    ...(indexUnavailable ? { index_unavailable: true } : {}),
   }
 }

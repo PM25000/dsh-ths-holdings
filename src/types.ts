@@ -21,11 +21,13 @@ export interface Stats {
   readonly sh_pct: number
   /** Intraday P&L percent series for the mini chart. */
   readonly chart_data: readonly ChartPoint[]
+  /** Index acquisition failed; display an unavailable value rather than zero. */
+  readonly index_unavailable?: boolean
   /** ISO-8601 time of the last fetch. */
   readonly updated_at: string
   /** Empty on success; a human- or machine-readable message otherwise. */
   readonly error: string
-  /** True when the configured Cookie was rejected (HTTP 401/403) by the ledger API. */
+  /** True when the ledger explicitly requires reauthentication (HTTP 401). */
   readonly token_expired: boolean
 }
 
@@ -38,6 +40,8 @@ export interface VerifyPortfolio {
 
 /** The `/api/stock-pnl/verify` payload: whether a usable Cookie is stored. */
 export interface VerifyView {
+  /** Distinguishes a temporary rejection from an invalid login. */
+  readonly reason?: string
   /** True when the credential reference holds a non-empty Cookie. */
   readonly configured: boolean
   /** True when the stored Cookie was accepted by the ledger API. */
