@@ -7,8 +7,6 @@
   <img src="https://img.shields.io/badge/license-MIT-ff1493?style=flat-square" alt="MIT">
 </p>
 
-开发中：本分支新增自动挂载的只读 DSH 工具及 ths-portfolio-report 随包 Skill，支持手动查询和定时持仓报告。详见[定时任务指南](docs/automation.zh.md)。已发布的 0.2.2 尚不包含此功能。
-
 [English](README.md) | 中文
 
 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（DSH）桌面端与网页端上的**持仓盈亏悬浮卡片**。自动从[同花顺投资账本](https://tzzb.10jqka.com.cn)同步你的**真实持仓数据**——无需手动添加股票。实时显示**今日盈亏**、**上证指数**和当日分时走势图，遵循 A 股红涨绿跌惯例。
@@ -21,7 +19,9 @@
 
 ## 版本兼容性
 
-插件 **0.2.2** 适配 DSH **0.2 系列**，已在 Desktop **0.2.0-rc.2** 验证加载与运行，无需版本兼容性豁免。DSH 0.1 系列请保留旧插件 **0.2.0**；本次适配不支持旧宿主。
+插件 **0.3.0** 适配 DSH **0.2 系列**，已在 Desktop **0.2.0-rc.2** 验证加载与运行，无需版本兼容性豁免。DSH 0.1 系列请保留旧插件 **0.2.0**；本次适配不支持旧宿主。
+
+**0.3.0** 新增普通聊天查询持仓、定时持仓报告和「立即更新数据」，并包含网络层稳定性修复。
 
 ## 安装
 
@@ -56,12 +56,6 @@ dsh plugin --profile web add dsh-ths-holdings
 4. 登录成功后窗口自动关闭，Cookie 自动保存，卡片立即刷新并显示你的持仓。
 5. 插件自动发现你的组合——如有多个，从下拉框选一个即可。
 
-> 自动获取使用独立的临时浏览器配置，只通过浏览器层接口读取 Cookie，不连接网页调试器、不注入脚本、不模拟页面尺寸。保存时仅保留 `10jqka.com.cn` 及其子域的 Cookie，浏览器关闭后删除临时配置。登录过程中无需打开开发者工具。
-
-如果关闭窗口超时，插件会在浏览器实际退出后继续清理临时配置；清理失败时，设置面板会保留提示和「重试清理」按钮。保存 Cookie 最多等待 30 秒，超时或取消后会关闭登录窗口，但已经提交的存储操作仍可能完成。页面会提示结果尚未确认，并在该操作结束前阻止再次保存，避免旧请求覆盖新 Cookie。
-
-自动登录启动或进行中，手动保存暂不可用；请先取消自动登录并等待结束，再手动保存。尚未完成的保存会在同一个 DSH 进程重新加载插件后继续阻止同名凭据的新写入，直到旧操作结束。
-
 在 ⚙ 设置展开页点击 **立即更新数据**，可使用已保存的登录状态和所选组合立即拉取盈亏与指数。查询时按钮显示“更新中…”；失败时保留上次成功数值和原更新时间。
 
 **手动方式（如偶尔需要）**：
@@ -81,6 +75,26 @@ dsh plugin --profile web add dsh-ths-holdings
 >
 > ![上传数据教程](assets/update.png)
 
+## 聊天查询持仓
+
+安装并启用插件后会自动挂载随包的 `ths-portfolio-report` Skill，普通聊天和定时任务均可使用，无需单独安装 Skill 或部署 MCP 服务。登录和账本选择沿用卡片设置，无需手动查找或填写账本 ID。
+
+完成登录后，在 DSH 聊天中直接说：
+
+> 查询我的同花顺投资账本持仓
+
+助手会使用当前选择的账本。有多个账本且尚未选择时，按提示选择账本名称即可。也可以直接说“查询同花顺投资账本中‘长期投资’的持仓”。
+
+报告默认包含资产概览、完整持仓和主要持仓分布，列出股票名称与代码、数量、成本价、现价、市值、仓位、持仓盈亏和日盈亏。报告会区分本次查询时间与账本上传时间；数据缺失时会说明，不把缺失项当作零。
+
+## 定时报告
+
+例如，在聊天中说：
+
+> 每个工作日下午4点半，查询我的同花顺投资账本持仓，生成持仓和盈亏报告。按北京时间执行，固定使用当前选择的账本。
+
+创建后请让助手确认账本名称和下次运行时间。定时报告需要 DSH 保持运行，并启用定时任务功能（Schedule）；工作日规则不会自动排除交易所节假日。
+
 ## 特性
 
 - **📊 实时持仓盈亏** — 每 20 秒（可配置）轮询你的真实组合
@@ -94,107 +108,28 @@ dsh plugin --profile web add dsh-ths-holdings
 - **⚙ 就地设置** — 粘贴 Cookie、选择组合，全在卡片上完成
 - **🔒 凭据安全** — Cookie 始终留在宿主进程
 
-## 工作原理
-
-```text
-┌─────────────── Web 浏览器 ───────────────┐
-│  lib/client.js（浏览器端模块）            │
-│  · shell.overlay 槽位 → 悬浮卡片          │
-│  · React + CSS Modules                    │
-│  · 配置存 localStorage                    │
-│          │ fetch（同源）                  │
-└──────────┼────────────────────────────────┘
-           ▼
-┌─────────────── DSH 宿主（lib/index.js）──┐
-│  cordis 插件：webServer 路由             │
-│  · GET /api/stock-pnl          快照      │
-│  · GET /api/stock-pnl/portfolios 账户列表 │
-│  · GET /api/stock-pnl/verify    Cookie 校验 │
-│  · POST /api/stock-pnl/cookie   保存 Cookie │
-│  · POST /api/stock-pnl/fund-key 保存组合    │
-│  · GET /api/stock-pnl/acquire*   自动登录 │
-│  通过 ctx.credentials 解析 Cookie        │
-│  自动发现 user_id + fund_key             │
-│  POST 同花顺账本 API                     │
-└───────────────────────────────────────────┘
-```
-
-node 半区每次请求通过凭据引用通道（`ctx.credentials`）读取登录 Cookie。手动粘贴通过插件同源 POST 接口保存，保存后的 Cookie 不会回传浏览器端；自动获取的 Cookie 只在宿主中处理。携带凭据的请求不跟随重定向。
-
-网络层在每次请求及重试前维护请求所需的临时状态，不改写已保存的登录票据；无法识别的格式沿用原请求。该兼容性处理不额外发起后台请求，也不代替登录失效后的重新登录。
-
-「自动获取 Cookie」走宿主进程内的 `acquire.ts` 状态机：点按钮 → 用系统 Edge / Chrome 打开投资账本 → 浏览器层读取到 `userid` 后保存本站 Cookie 并关闭窗口。`login-browser.ts` 使用专用通信管道，不监听调试端口，不启用网页的 Runtime / Debugger，也不读取页面内容；网页风控提示需用户查看。取消、超时、关窗和保存失败都有相应处理。手动保存不再依赖 DSH 旧版的 `connection.api.credentials`，并遵循宿主配置的凭据名称。
-
-## 配置
-
-| 键 | 默认值 | 含义 |
-|---|---|---|
-| `cookieEnv` | `STOCK_PNL_COOKIE` | 存放账本 Cookie 的凭据引用。 |
-| `fundKeyEnv` | `STOCK_PNL_FUND_KEY` | 存放组合 key 的凭据引用（从卡片 ⚙ 表单保存）。 |
-| `user_id` | Cookie 的 `userid` | 账本用户 id，表单载荷中都会包含；为空时回退到 Cookie 自身的 `userid`。 |
-| `fund_key` | 自动发现 | 选择所管理组合的账本 fund key；设置了 `fundKeyEnv` 凭据时覆盖，为空时仅在唯一账本可用时自动发现，多账本需要明确选择。 |
-| `pnlUrl` | 同花顺 `time_share` 端点 | 盈亏端点覆盖（测试指向脚本化服务器）。 |
-| `indexUrl` | 同花顺 `getQuotes` 端点 | 指数端点覆盖（测试指向脚本化服务器）。 |
-| `pollMs` | `20000` | 卡片使用的轮询间隔（毫秒）；随每次响应的 `poll_ms` 上报给浏览器。 |
-| `requestTimeoutMs` | `15000` | 模型查询或卡片数据拉取的截止时间，100–120000毫秒。 |
-
-## 目录结构
-
-```
-dsh-ths-holdings/
-├── src/
-│   ├── index.ts            # node 半区：webServer 路由 + 凭据解析
-│   ├── fetch.ts            # 同花顺账本 API 调用 + 自动发现 + Cookie 校验
-│   ├── acquire.ts          # 自动获取 Cookie 状态机
-│   ├── login-browser.ts    # 系统浏览器启动和 Cookie 读取
-│   ├── settings.ts         # 手动保存 Cookie / 组合
-│   └── client/
-│       ├── index.ts        # 浏览器半区：shell.overlay 注册
-│       └── StockPnlCard.tsx
-├── lib/                    # 构建产物（index.js + client.js）
-├── cordis.patch.yml        # dsh.bundle 补丁层
-├── package.json            # dsh.bundle + dsh.client 清单
-├── tests/                  # 账本获取 / 校验 / 自动获取单元测试
-└── README.md
-```
-
 ## FAQ / 故障排查
 
 | 现象 | 原因与解决 |
 |---|---|
 | 卡片显示 `请配置 Cookie` | `STOCK_PNL_COOKIE` 为空——在 ⚙ 面板点「自动获取」或手动粘贴。 |
 | 卡片显示 `Token 已过期` | 会话 Cookie 过期——重新自动获取，或按上方手动步骤复制请求标头中的 Cookie。 |
-| 保存时报 `Cannot read properties of undefined (reading 'credentials')` | 旧插件调用了 DSH 已变更的客户端接口。安装修复版本，重启 `dsh web` 并刷新 DSH 页面。 |
 | 按 F12 没反应 | 从浏览器右上角菜单 → 更多工具 → 开发者工具打开，再按手动步骤查找 Cookie。 |
 | 登录页面提示「当前页面不支持开发者工具」 | 自动获取不需要打开开发者工具。手动方式可先查看 Network 已记录的本站请求；没有可用 Cookie 时改用自动获取。 |
 | 自动获取弹出窗口后没有反应 | 在弹出窗口完成登录（扫码 / 账号），登录后窗口会自动关闭并保存。 |
-| 弹出窗口显示 `Nginx forbidden` | 同花顺风控偶发拦截——在窗口里 F5 刷新或手动访问登录页重试；登录完成后点「我已登录，继续 →」。 |
 | 保存后徽标显示 `✗ 无效` | 粘贴的 Cookie 已失效或不是投资账本会话——重新登录获取后再试；面板会给出具体原因。 |
 | 下拉框没有组合 | 组合列表需要有效的 Cookie——先保存有效 Cookie，再点 ↻ 刷新。 |
 | 有多个组合 | 从下拉框选一个——选择会保存为 `STOCK_PNL_FUND_KEY`。 |
 | 粘贴的 Cookie 带换行 | 插件保存时会去掉空白，换行粘贴也没问题。 |
-
-## Model Experience
-
-宿主提供 tools、skills 服务时，插件自动注册 ths_list_portfolios、ths_get_positions、ths_get_pnl 三个只读工具及随包 ths-portfolio-report Skill；卡片本身不追加 prompt。
-
-#### KV Cache 影响
-
-增加三个稳定工具 schema 和一个简短 Skill 目录项；Skill 正文按需加载，持仓结果只在查询时进入上下文。
+| 提示“稍后重试”或“数据暂时无法获取” | 稍后再试。卡片可能保留上次成功值，请留意显示的更新时间。 |
+| 助手无法查询持仓 | 确认插件已启用且已完成登录，完全重启 DSH 后再试。 |
+| 报告查询失败，但卡片有数值 | 卡片可能显示旧快照；报告按本次查询失败处理，不会使用旧值替代。 |
 
 ## 已知限制
 
-- **账本 API 是未公开的、需登录的端点** — 响应格式可能变化，Cookie 会过期。偶发403由网络层有限重试恢复；持续失败时卡片保留上次成功值和原更新时间，明确登录失效仍提示重新登录。
-- **组合列表端点（`account_list`）需要先保存 Cookie** — 粘贴有效 Cookie 后组合选择器才会出现。
 - **自动获取使用系统浏览器** — 无需安装 Playwright，自动选择已安装的 Edge / Chrome；机器上两者都没有时需手动粘贴。浏览器必须运行在可显示窗口的桌面会话中。
-- **无服务端轮询** — 路由按请求拉取，卡片按配置的 `pollMs` 间隔轮询；没有共享缓存或推送通道。
-
-## 本地验证
-
-`npm test` 运行离线回归测试，`npm run typecheck` 和 `npm run build` 检查并构建插件。
-`npm run test:browser` 会打开临时浏览器访问本机测试页，验证 Cookie 读取和常见开发者工具检测信号；不会访问真实账本。真实登录和持仓校验需使用者完成。
-
-`npm run test:desktop-compat` 使用已安装 Desktop 的真实运行时，在独立 profile 中验证插件加载、凭据保存与读取、Cookie 校验、组合选择和盈亏接口。账本响应使用本机测试服务，不使用真实账户；现有 DSH 配置不参与测试。默认查找 Windows 标准安装目录，其他安装位置可通过 `DSH_DESKTOP_EXECUTABLE` 和 `DSH_DESKTOP_RESOURCES` 指定。追加 `--serve` 直接运行测试脚本可保留测试服务供页面检查；独立测试目录位于 `dist/desktop-compat-*`。
+- 持仓报告目前支持人民币沪深股票及 ETF 普通账本，暂不支持融资融券、空头、B 股及其他市场。
+- 登录信息只填写在插件设置中，不要放进聊天或定时任务提示。
 
 ## License
 
