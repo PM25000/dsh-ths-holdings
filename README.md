@@ -20,9 +20,9 @@ Unlike watchlist tools, this plugin reads your **actual positions** and shows yo
 
 ## Version compatibility
 
-Plugin **0.3.0** targets the DSH **0.2 series** and has been tested with Desktop **0.2.0-rc.2**, without a compatibility exemption. For DSH 0.1, keep plugin **0.2.0**; this migration does not support the older host.
+Plugin **0.3.1** targets the DSH **0.2 series** and has been tested with Desktop **0.2.0-rc.2**, without a compatibility exemption. For DSH 0.1, keep plugin **0.2.0**; this migration does not support the older host.
 
-**0.3.0** adds holdings queries in ordinary chat, scheduled portfolio reports, and **立即更新数据** (Refresh now), along with network stability fixes.
+**0.3.1** adds **Settings → Tonghuashun holdings**, with a refresh interval field and card visibility switch. Changes apply when saved and persist after restart.
 
 ## Installation
 
