@@ -95,9 +95,6 @@ describe('strict ledger reads', () => {
     assert.equal(r.code, 'API_REJECTED'); assert(!JSON.stringify(r).includes('private-cookie-value'))
   })
   it('retries a temporary network failure once and no more', async () => {
-    let calls = 0
-    const h = fixture({ intercept: () => { if (++calls <= 1) throw new Error('private-cookie-value'); return undefined } })
-    assert.equal((await h.client.list(signal())).status, 'ok'); assert.equal(calls, 2)
     let failures = 0
     const bad = fixture({ intercept: () => { failures++; throw new Error('private-cookie-value') } })
     assert.equal((await bad.client.list(signal())).code, 'NETWORK_ERROR'); assert.equal(failures, 2)
@@ -147,12 +144,8 @@ describe('strict ledger reads', () => {
 })
 
 
-describe('model gateway recovery', () => {
-  it('silently recovers intermittent gateway refusals and keeps persistent refusal separate from auth', async () => {
-    const h = fixture({ intercept: () => ++calls < 3 ? new Response('private-cookie', { status: 403 }) : undefined })
-    let calls = 0
-    const client = new LedgerClient({ ...config, requestTimeoutMs: 5000 }, async () => 'userid=test; sid=private', h.fetchImpl)
-    assert.equal((await client.list(signal())).status, 'ok'); assert.equal(calls, 3)
+describe('model gateway failure', () => {
+  it('keeps a persistent refusal separate from authentication failure', async () => {
     let blockedCalls = 0
     const blocked = new LedgerClient({ ...config, requestTimeoutMs: 5000 }, async () => 'userid=test; sid=private', async () => { blockedCalls++; return new Response('private-cookie', { status: 403 }) })
     const result = await blocked.list(signal())

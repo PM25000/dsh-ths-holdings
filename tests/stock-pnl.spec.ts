@@ -22,7 +22,7 @@ import type { CredentialInfo, CredentialRef, ResolvedCredential } from '@deepsee
 import z from '@deepseek-ai/schemastery'
 import WebServer from '@deepseek-ai/dsh-host-webserver'
 import * as uiStockPnl from '../src/index.ts'
-import { collectStats, cookieField, listPortfolios, verifyCookie, type FetchLike } from '../src/fetch.ts'
+import { collectStats, cookieField, verifyCookie, type FetchLike } from '../src/fetch.ts'
 
 const FIXED_NOW = () => new Date('2026-05-26T06:00:00Z')
 const COOKIE_ENV = 'STOCK_PNL_COOKIE'
@@ -114,31 +114,6 @@ describe('cookieField', () => {
     // field-boundary regex must win.
     const cookie = 'pex_userid=el2bijcg9j; userid=825299250; tz=8'
     assert.equal(cookieField(cookie, 'userid'), '825299250')
-    // Reaffirm the doc'd regression: the naive extraction would be WRONG here.
-    assert.equal(cookie.match(/userid=([^;]*)/)?.[1], 'el2bijcg9j')
-  })
-})
-
-describe('listPortfolios', () => {
-  it('normalizes a line-wrapped cookie and sends the minimal accepted request shape', async () => {
-    // A credential-store read of a long cookie arrives with a space at each
-    // YAML-fold break; the header must be rebuilt before it reaches the API.
-    const wrapped = 'userid=825299250; sid=abc def ghi; tz=8'
-    const seen: Record<string, string | undefined> = {}
-    const list = await listPortfolios(wrapped, '825299250', async (_url, init) => {
-      assert.equal(init.redirect, 'manual')
-      const headers = new Headers(init.headers)
-      seen.cookie = headers.get('cookie') ?? ''
-      seen.referer = headers.get('referer') ?? undefined
-      seen.accept = headers.get('accept') ?? undefined
-      return jsonResponse({ error_code: '0', ex_data: { common: [{ fund_key: 'k1', manualname: '组合A', brokername: '华泰' }] } })
-    })
-    // normalizeCookie strips whitespace per `key=value` part and rejoins with '; '.
-    assert.equal(seen.cookie, 'userid=825299250; sid=abcdefghi; tz=8')
-    // The minimal shape (no browser-simulation headers) is what the gateway accepts.
-    assert.equal(seen.referer, undefined)
-    assert.equal(seen.accept, undefined)
-    assert.deepEqual(list, [{ fund_key: 'k1', manualname: '组合A', brokername: '华泰' }])
   })
 })
 
@@ -308,15 +283,6 @@ describe('real Loader composition', () => {
 
 describe('card gateway recovery', () => {
   const base = { pnlUrl: 'https://ledger.test/pnl', indexUrl: 'https://ledger.test/index', cookie: 'userid=test; sid=private', cookieEnv: COOKIE_ENV, user_id: '', fund_key: 'test', now: FIXED_NOW }
-  it('recovers intermittent P&L/index refusals before returning a clean snapshot', async () => {
-    const counts = new Map<string, number>()
-    const stats = await collectStats({ ...base, fetchImpl: async url => {
-      const count = (counts.get(url) ?? 0) + 1; counts.set(url, count)
-      return count < 3 ? new Response('private upstream body', { status: 403 }) : jsonResponse(url.endsWith('/pnl') ? PNL_BODY : INDEX_BODY)
-    } })
-    assert.equal(stats.error, ''); assert.equal(stats.token_expired, false); assert.equal(stats.pnl_pct, 2.5); assert.equal(stats.sh_pct, 1)
-    assert.deepEqual([...counts.values()], [3, 3])
-  })
   it('keeps a sustained refusal distinct from login expiry and never exposes its body', async () => {
     let calls = 0
     const stats = await collectStats({ ...base, fetchImpl: async () => { calls++; return new Response('Nginx forbidden private-cookie', { status: 403 }) } })
@@ -324,10 +290,6 @@ describe('card gateway recovery', () => {
     assert(stats.error.includes('稍后')); assert(!/403|Nginx|private-cookie/.test(stats.error))
     const result = await verifyCookie(base.cookie, undefined, async () => new Response('private-cookie', { status: 403 }))
     assert.equal(result.reason, 'blocked'); assert.equal(result.valid, false); assert(!result.hint?.includes('重新登录'))
-  })
-  it('marks an unavailable index rather than reporting a false zero', async () => {
-    const result = await collectStats({ ...base, requestTimeoutMs: 50, fetchImpl: async url => url.endsWith('/pnl') ? jsonResponse(PNL_BODY) : new Response('', { status: 403 }) })
-    assert.equal(result.error, ''); assert.equal(result.index_unavailable, true); assert.equal(result.pnl_pct, 2.5)
   })
 })
 

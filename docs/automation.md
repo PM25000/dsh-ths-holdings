@@ -76,7 +76,7 @@ The ledger depends on user uploads. Successful reads do not establish real-time 
 
 PR checks run typechecking, tests and packed-install acceptance on Node 22 and 24 without real account access or credentials.
 
-Run `pnpm test`, `pnpm typecheck` and `pnpm build` for behavior, types and plugin artifacts. `pnpm test:package` builds and packs the plugin, installs the actual tgz in a fresh directory, changes cwd, and verifies automatic registration, queries, unloading and two host boots.
+Run `pnpm test`, `pnpm typecheck` and `pnpm build` for behavior, types and plugin artifacts. Shared transport tests cover retry boundaries; callers check their own failure semantics. `pnpm test:package` builds and packs the plugin, installs the actual tgz in a fresh directory, changes cwd, and verifies Skill/tool registration, nonempty holdings, unloading and two host boots. Registration lifecycle coverage lives in this installed-package check rather than a duplicate source-level test.
 
 `pnpm test:desktop-compat` uses the installed Desktop host with an isolated profile and records both manual features and Schedule capability. `node tests/desktop-compat.smoke.cjs --require-schedule` requires full scheduling support; the default bundle combination in the isolated acceptance profile currently fails this stricter check because schedule is absent.
 

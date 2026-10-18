@@ -98,7 +98,10 @@ describe('card operation deadline', () => {
         else {
           assert.equal(result.status, 200)
           if (stage === '/pnl') assert.notEqual(JSON.parse(result.body).error, '')
-          else assert.equal(JSON.parse(result.body).index_unavailable, true)
+          else {
+            assert.equal(JSON.parse(result.body).index_unavailable, true)
+            assert.equal(JSON.parse(result.body).pnl_yk, 10)
+          }
         }
         assert.equal(endpoints.length, ['account_list', '/pnl', '/index'].indexOf(stage) + 1)
       } finally {
