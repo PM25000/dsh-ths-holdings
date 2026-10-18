@@ -98,10 +98,10 @@ Skill 出现在列表或加载了正文，只证明发现与加载成功。若�
 
 ## 开发与验收命令
 
-- `pnpm test`：原有卡片、凭据及新增查询与注册表测试。
+- `pnpm test`：卡片、凭据、数据查询及故障处理回归。重试边界由共享网络层测试覆盖，各调用方只检查自身的错误语义。
 - `pnpm typecheck`、`pnpm build`：类型与插件构建。
 - PR 自动检查在 Node 22、24 上运行类型检查、测试和安装包验收，不访问真实账本或凭据。
-- `pnpm test:package`：重新构建并打包，在新目录安装实际 tgz，改变工作目录，验证自动挂载、查询、卸载和两次宿主启动。
+- `pnpm test:package`：重新构建并打包，在新目录安装实际 tgz，改变工作目录，验证 Skill 与工具注册、非空持仓查询、卸载和两次宿主启动。注册生命周期集中在此验收，不重复做源码级测试。
 - `pnpm test:desktop-compat`：使用已安装 Desktop 的真实宿主和隔离 profile；记录普通聊天的 Skill 目录、正文加载、查询、斜杠菜单和 Schedule 能力，不修改日常配置。
 - `node tests/desktop-compat.smoke.cjs --require-schedule`：强制要求该 Desktop profile 同时提供 Schedule；当前隔离验收 profile 的默认 bundle 组合会明确失败并指出缺少 schedule。
 - `node tests/desktop-compat.smoke.cjs --with-schedule --require-schedule`：在隔离 profile 加入官方 Schedule bundle，强制验收 Desktop 的完整定时报告链路。
