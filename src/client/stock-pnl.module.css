@@ -167,6 +167,7 @@
 
 .settingsActions {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
 }
 
@@ -378,7 +379,12 @@
   cursor: pointer;
 }
 
-.ghostBtn:hover {
+.ghostBtn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.ghostBtn:hover:not(:disabled) {
   background: rgba(255, 255, 255, 0.08);
 }
 

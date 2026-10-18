@@ -7,6 +7,8 @@
   <img src="https://img.shields.io/badge/license-MIT-ff1493?style=flat-square" alt="MIT">
 </p>
 
+开发中：本分支新增自动挂载的只读 DSH 工具及 ths-portfolio-report 随包 Skill，支持手动查询和定时持仓报告。详见[定时任务指南](docs/automation.zh.md)。已发布的 0.2.2 尚不包含此功能。
+
 [English](README.md) | 中文
 
 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（DSH）桌面端与网页端上的**持仓盈亏悬浮卡片**。自动从[同花顺投资账本](https://tzzb.10jqka.com.cn)同步你的**真实持仓数据**——无需手动添加股票。实时显示**今日盈亏**、**上证指数**和当日分时走势图，遵循 A 股红涨绿跌惯例。
@@ -59,6 +61,8 @@ dsh plugin --profile web add dsh-ths-holdings
 如果关闭窗口超时，插件会在浏览器实际退出后继续清理临时配置；清理失败时，设置面板会保留提示和「重试清理」按钮。保存 Cookie 最多等待 30 秒，超时或取消后会关闭登录窗口，但已经提交的存储操作仍可能完成。页面会提示结果尚未确认，并在该操作结束前阻止再次保存，避免旧请求覆盖新 Cookie。
 
 自动登录启动或进行中，手动保存暂不可用；请先取消自动登录并等待结束，再手动保存。尚未完成的保存会在同一个 DSH 进程重新加载插件后继续阻止同名凭据的新写入，直到旧操作结束。
+
+在 ⚙ 设置展开页点击 **立即更新数据**，可使用已保存的登录状态和所选组合立即拉取盈亏与指数。查询时按钮显示“更新中…”；失败时保留上次成功数值和原更新时间。
 
 **手动方式（如偶尔需要）**：
 
@@ -117,6 +121,8 @@ dsh plugin --profile web add dsh-ths-holdings
 
 node 半区每次请求通过凭据引用通道（`ctx.credentials`）读取登录 Cookie。手动粘贴通过插件同源 POST 接口保存，保存后的 Cookie 不会回传浏览器端；自动获取的 Cookie 只在宿主中处理。携带凭据的请求不跟随重定向。
 
+网络层在每次请求及重试前维护请求所需的临时状态，不改写已保存的登录票据；无法识别的格式沿用原请求。该兼容性处理不额外发起后台请求，也不代替登录失效后的重新登录。
+
 「自动获取 Cookie」走宿主进程内的 `acquire.ts` 状态机：点按钮 → 用系统 Edge / Chrome 打开投资账本 → 浏览器层读取到 `userid` 后保存本站 Cookie 并关闭窗口。`login-browser.ts` 使用专用通信管道，不监听调试端口，不启用网页的 Runtime / Debugger，也不读取页面内容；网页风控提示需用户查看。取消、超时、关窗和保存失败都有相应处理。手动保存不再依赖 DSH 旧版的 `connection.api.credentials`，并遵循宿主配置的凭据名称。
 
 ## 配置
@@ -126,10 +132,11 @@ node 半区每次请求通过凭据引用通道（`ctx.credentials`）读取登�
 | `cookieEnv` | `STOCK_PNL_COOKIE` | 存放账本 Cookie 的凭据引用。 |
 | `fundKeyEnv` | `STOCK_PNL_FUND_KEY` | 存放组合 key 的凭据引用（从卡片 ⚙ 表单保存）。 |
 | `user_id` | Cookie 的 `userid` | 账本用户 id，表单载荷中都会包含；为空时回退到 Cookie 自身的 `userid`。 |
-| `fund_key` | 自动发现 | 选择所管理组合的账本 fund key；设置了 `fundKeyEnv` 凭据时覆盖，为空时从组合列表自动发现。 |
+| `fund_key` | 自动发现 | 选择所管理组合的账本 fund key；设置了 `fundKeyEnv` 凭据时覆盖，为空时仅在唯一账本可用时自动发现，多账本需要明确选择。 |
 | `pnlUrl` | 同花顺 `time_share` 端点 | 盈亏端点覆盖（测试指向脚本化服务器）。 |
 | `indexUrl` | 同花顺 `getQuotes` 端点 | 指数端点覆盖（测试指向脚本化服务器）。 |
 | `pollMs` | `20000` | 卡片使用的轮询间隔（毫秒）；随每次响应的 `poll_ms` 上报给浏览器。 |
+| `requestTimeoutMs` | `15000` | 模型查询或卡片数据拉取的截止时间，100–120000毫秒。 |
 
 ## 目录结构
 
@@ -169,15 +176,15 @@ dsh-ths-holdings/
 
 ## Model Experience
 
-无——卡片是宿主数据路由上的浏览器端叠加层，不注册任何面向模型的内容。
+宿主提供 tools、skills 服务时，插件自动注册 ths_list_portfolios、ths_get_positions、ths_get_pnl 三个只读工具及随包 ths-portfolio-report Skill；卡片本身不追加 prompt。
 
 #### KV Cache 影响
 
-无——插件不贡献任何 prompt、schema 或结果。
+增加三个稳定工具 schema 和一个简短 Skill 目录项；Skill 正文按需加载，持仓结果只在查询时进入上下文。
 
 ## 已知限制
 
-- **账本 API 是未公开的、需登录的端点** — 响应格式可能变化，Cookie 会过期；插件以错误呈现，而不是重试或缓存。
+- **账本 API 是未公开的、需登录的端点** — 响应格式可能变化，Cookie 会过期。偶发403由网络层有限重试恢复；持续失败时卡片保留上次成功值和原更新时间，明确登录失效仍提示重新登录。
 - **组合列表端点（`account_list`）需要先保存 Cookie** — 粘贴有效 Cookie 后组合选择器才会出现。
 - **自动获取使用系统浏览器** — 无需安装 Playwright，自动选择已安装的 Edge / Chrome；机器上两者都没有时需手动粘贴。浏览器必须运行在可显示窗口的桌面会话中。
 - **无服务端轮询** — 路由按请求拉取，卡片按配置的 `pollMs` 间隔轮询；没有共享缓存或推送通道。

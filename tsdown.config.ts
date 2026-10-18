@@ -31,7 +31,7 @@ const config: UserConfig[] = [
   // ── Node half ──
   {
     name: PACKAGE_NAME,
-    entry: ['src/index.ts'],
+    entry: ['src/index.ts', 'src/model.ts'],
     outDir: 'lib',
     format: ['esm'],
     platform: 'node',
