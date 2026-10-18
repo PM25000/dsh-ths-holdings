@@ -22,6 +22,8 @@ A visible catalog entry or loaded body establishes discovery and loading. `REQUE
 
 ## Credentials and portfolio selection
 
+Opening card settings only auto-selects a sole portfolio. Multiple portfolios require a manual choice; opening the panel alone does not save a default.
+
 Sign in and select a portfolio through the card settings. The host credential service owns the Cookie; it never belongs in a Skill, scheduled prompt, or tool arguments.
 
 Selection priority: explicit `portfolio_id`, saved `fundKeyEnv`, configured `fund_key`, then a sole available portfolio. Ambiguous selection returns PORTFOLIO_REQUIRED. An invalid saved or explicit identifier fails rather than switching portfolios.
@@ -59,6 +61,8 @@ Scheduled runs do not open login windows, change credentials or portfolio select
 stock_position is authoritative for holdings. sort_list only enriches names by market and code; additional watchlist securities are excluded. pass_quotes was validated as an input-driven quote endpoint, but this version does not refresh prices separately because mixing times would invalidate snapshot amounts and profit.
 
 Credentials are resolved for each operation. There is no persistent result cache. requestTimeoutMs defaults to 15000 (100–120000), covering credentials, selection and enrichment. HTTP 403 is recovered silently in the transport, after approximately 300ms and 900ms plus small jitter, with at most three attempts per request. Model reads also retry network/429/5xx failures once, within that same three-attempt cap and original deadline. HTTP 401, redirects, business rejection and cancellation are not retried; the Skill adds no retries.
+
+Card refreshes share one deadline starting before credential reads. Discovery, P&L and index requests do not restart that timer. A stalled credential read also ends the refresh and releases the immediate update button.
 
 The card receives only the final refresh result. Empty series, malformed responses and invalid numbers are not accepted as successful refreshes. If recovery is exhausted, credentials are retained and previous successful card values keep their original update time; without previous data the card shows placeholders. Selecting another portfolio or saving a new Cookie in the card clears that local snapshot. Model tool failures still return data=null and never substitute previous results.
 

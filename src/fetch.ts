@@ -285,6 +285,8 @@ export interface CollectStatsInput extends Endpoints {
   readonly fetchImpl?: FetchLike
   /** Overall deadline for this snapshot, including silent recovery. */
   readonly requestTimeoutMs?: number
+  /** An existing operation deadline; reuse it instead of starting a new snapshot timer. */
+  readonly signal?: AbortSignal
   /** Clock override for tests; defaults to `new Date()`. */
   readonly now?: () => Date
 }
@@ -297,7 +299,7 @@ export interface CollectStatsInput extends Endpoints {
 export async function collectStats(input: CollectStatsInput): Promise<Stats> {
   const fetchImpl = input.fetchImpl ?? defaultFetch
   const now = input.now ?? (() => new Date())
-  const signal = AbortSignal.timeout(input.requestTimeoutMs ?? 15_000)
+  const signal = input.signal ?? AbortSignal.timeout(input.requestTimeoutMs ?? 15_000)
   if (input.cookie === undefined || input.cookie.length === 0) {
     return {
       pnl_pct: 0,

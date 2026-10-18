@@ -22,8 +22,12 @@ function deferred<T>() {
   return { promise, resolve }
 }
 
-async function card(t: TestContext, options: { showAmount?: boolean; pct?: number; yk?: number; offline?: boolean; error?: string } = {}) {
-  const stored = new Map([['stock-pnl-fund-key', 'old-fund']])
+async function card(t: TestContext, options: {
+  showAmount?: boolean; pct?: number; yk?: number; offline?: boolean; error?: string
+  savedFundKey?: string | null; portfolios?: readonly string[]
+} = {}) {
+  const stored = new Map<string, string>()
+  if (options.savedFundKey !== null) stored.set('stock-pnl-fund-key', options.savedFundKey ?? 'old-fund')
   if (options.showAmount) stored.set('stock-pnl-show-amount', 'true')
   const intervals = new Map<number, () => void>()
   const timeouts = new Map<number, () => void>()
@@ -54,7 +58,7 @@ async function card(t: TestContext, options: { showAmount?: boolean; pct?: numbe
       case '/api/stock-pnl/acquire/status': value = statuses.shift() ?? host.status; break
       case '/api/stock-pnl/acquire/cancel': host.status = { state: 'idle' }; value = host.status; break
       case '/api/stock-pnl/verify': value = verifications.shift() ?? { configured: true, valid: host.valid ?? host.status.state === 'saved' }; break
-      case '/api/stock-pnl/portfolios': value = [{ fund_key: host.fund, manualname: 'test', brokername: 'test' }]; break
+      case '/api/stock-pnl/portfolios': value = (options.portfolios ?? [host.fund]).map(fund_key => ({ fund_key, manualname: fund_key, brokername: 'test' })); break
       case '/api/stock-pnl':
         if (host.snapshotOffline) throw new Error('offline')
         value = snapshots.shift() ?? { pnl_pct: host.snapshotPct, pnl_yk: host.snapshotYk, sh_pct: 0, chart_data: [], updated_at: host.snapshotTime, error: host.snapshotError, index_unavailable: host.indexUnavailable, token_expired: false, poll_ms: 20_000 }
@@ -289,6 +293,30 @@ describe('login completion in the settings card', () => {
   })
 })
 
+
+describe('portfolio selection in settings', () => {
+  for (const portfolios of [[], ['sole'], ['first', 'second']]) {
+    it(`only auto-selects a sole portfolio (${portfolios.length} available)`, async t => {
+      const h = await card(t, { savedFundKey: null, portfolios })
+      await h.toggle()
+      assert.deepEqual(h.fundWrites, portfolios.length === 1 ? ['sole'] : [])
+      assert.equal(h.stored.get('stock-pnl-fund-key'), portfolios.length === 1 ? 'sole' : undefined)
+      if (portfolios.length > 1) {
+        await h.select('second')
+        assert.deepEqual(h.fundWrites, ['second'])
+        assert.equal(h.stored.get('stock-pnl-fund-key'), 'second')
+        await h.toggle(); await h.toggle()
+        assert.deepEqual(h.fundWrites, ['second'])
+      }
+    })
+  }
+  it('preserves an existing choice when multiple portfolios are listed', async t => {
+    const h = await card(t, { savedFundKey: 'second', portfolios: ['first', 'second'] })
+    await h.toggle()
+    assert.deepEqual(h.fundWrites, [])
+    assert.equal(h.stored.get('stock-pnl-fund-key'), 'second')
+  })
+})
 
 describe('previous successful card values during temporary failure', () => {
   it('preserves values and the original timestamp across repeated failures, then resumes fresh data', async t => {
