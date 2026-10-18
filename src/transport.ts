@@ -1,4 +1,6 @@
 /** Bounded recovery for the plugin's read-only ledger requests. */
+import { refreshLedgerRequest } from './v-token.ts'
+
 export type FetchLike = (url: string, init: RequestInit) => Promise<Response>
 interface RecoveryOptions {
   /** Existing model reads also recover once from network/429/5xx failures. */
@@ -15,7 +17,7 @@ function wait(milliseconds: number, signal: AbortSignal): Promise<void> {
     signal.addEventListener('abort', cancel, { once: true })
   })
 }
-/** No redirects, credential mutation, response cache, or replay of business failures. */
+/** No redirects, stored-credential mutation, response cache, or replay of business failures. */
 export async function fetchLedger(fetchImpl: FetchLike, url: string, init: RequestInit, options: RecoveryOptions = {}): Promise<Response> {
   const signal = init.signal ?? AbortSignal.timeout(15_000)
   const request: RequestInit = { ...init, redirect: 'manual', signal }
@@ -23,7 +25,7 @@ export async function fetchLedger(fetchImpl: FetchLike, url: string, init: Reque
   for (let attempt = 0; ; attempt++) {
     signal.throwIfAborted()
     let response: Response | undefined
-    try { response = await fetchImpl(url, request) } catch (error) {
+    try { response = await fetchImpl(url, refreshLedgerRequest(url, request)) } catch (error) {
       if (signal.aborted || !options.retryTransient || transientRetries >= 1 || attempt >= 2) throw error
       transientRetries++
     }

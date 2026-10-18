@@ -121,6 +121,8 @@ dsh plugin --profile web add dsh-ths-holdings
 
 node 半区每次请求通过凭据引用通道（`ctx.credentials`）读取登录 Cookie。手动粘贴通过插件同源 POST 接口保存，保存后的 Cookie 不会回传浏览器端；自动获取的 Cookie 只在宿主中处理。携带凭据的请求不跟随重定向。
 
+网络层在每次请求及重试前维护请求所需的临时状态，不改写已保存的登录票据；无法识别的格式沿用原请求。该兼容性处理不额外发起后台请求，也不代替登录失效后的重新登录。
+
 「自动获取 Cookie」走宿主进程内的 `acquire.ts` 状态机：点按钮 → 用系统 Edge / Chrome 打开投资账本 → 浏览器层读取到 `userid` 后保存本站 Cookie 并关闭窗口。`login-browser.ts` 使用专用通信管道，不监听调试端口，不启用网页的 Runtime / Debugger，也不读取页面内容；网页风控提示需用户查看。取消、超时、关窗和保存失败都有相应处理。手动保存不再依赖 DSH 旧版的 `connection.api.credentials`，并遵循宿主配置的凭据名称。
 
 ## 配置

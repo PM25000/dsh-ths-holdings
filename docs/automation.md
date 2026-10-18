@@ -62,6 +62,8 @@ Credentials are resolved for each operation. There is no persistent result cache
 
 The card receives only the final refresh result. Empty series, malformed responses and invalid numbers are not accepted as successful refreshes. If recovery is exhausted, credentials are retained and previous successful card values keep their original update time; without previous data the card shows placeholders. Selecting another portfolio or saving a new Cookie in the card clears that local snapshot. Model tool failures still return data=null and never substitute previous results.
 
+The network layer prepares temporary request state before each request and retry without rewriting stored login credentials. Unrecognized formats retain the original request. This adds no background requests or retry attempts and preserves the original deadline; it does not replace signing in again when needed.
+
 NOT_CONFIGURED/AUTH_REQUIRED require checking sign-in through settings; HTTP 401 requires reauthentication. REQUEST_BLOCKED means transport recovery was exhausted; the current report fails and the card retains previous values/time. Stored credentials are not cleared. PORTFOLIO_REQUIRED needs selection; PORTFOLIO_NOT_FOUND needs correcting the task or saved selection. TIMEOUT, NETWORK_ERROR and SERVICE_UNAVAILABLE produce a failed report. INVALID_RESPONSE and API_REJECTED preserve failure without echoing upstream content. NAME_LOOKUP_UNAVAILABLE permits original names. MISSING_* and *_MISMATCH disable derived analysis. UPLOAD_TIME_UNAVAILABLE never substitutes query time.
 
 The ledger depends on user uploads. Successful reads do not establish real-time synchronization with a broker account.

@@ -122,6 +122,8 @@ The node half reads the login Cookie per request through the credential-referenc
 
 Auto-acquire runs a host state machine (`acquire.ts`): open a system Edge / Chrome window, wait for a `userid` cookie, save ledger-domain cookies and close the window. `login-browser.ts` uses a dedicated pipe with browser-level commands, without opening a debugging port or enabling page Runtime / Debugger sessions. It does not read page contents; the user sees any site refusal directly. Cancellation, timeout, early closure and save failures are handled explicitly. Manual saves use the plugin's same-origin POST routes (`/api/stock-pnl/cookie` and `/api/stock-pnl/fund-key`), respect configured credential references, and no longer depend on DSH's legacy `connection.api.credentials` interface.
 
+The network layer prepares temporary request state before each request and retry without rewriting stored login credentials. Unrecognized formats retain the original request. This compatibility handling adds no background requests and does not replace signing in again when the session expires.
+
 ## Config
 
 | Key | Default | Meaning |
