@@ -124,6 +124,8 @@ export function StockPnlCard({ onSaveCookie, onSaveFundKey }: StockPnlInjected):
   const [saveError, setSaveError] = useState<string | null>(null)
   const [saved, setSaved] = useState(false)
   const [refreshKey, setRefreshKey] = useState(0)
+  const [updating, setUpdating] = useState(false)
+  const updateData = useRef<(() => Promise<void>) | null>(null)
   // Portfolio list and the currently selected fund_key.
   const [portfolios, setPortfolios] = useState<readonly PortfolioInfo[]>([])
   const [portfoliosLoading, setPortfoliosLoading] = useState(false)
@@ -187,13 +189,18 @@ export function StockPnlCard({ onSaveCookie, onSaveFundKey }: StockPnlInjected):
     let disposed = false
     let timer: ReturnType<typeof setTimeout> | undefined
     let lastGood: Snapshot | null = null
+    let running = false
     // A new refresh generation follows a credential/portfolio change: never reuse the old account.
     setSnapshot(null)
     setOffline(false)
     const tick = async (): Promise<void> => {
+      if (disposed || running) return
+      running = true
+      if (timer !== undefined) clearTimeout(timer)
+      setUpdating(true)
       let interval = DEFAULT_POLL_MS
       try {
-        const response = await fetch('/api/stock-pnl')
+        const response = await fetch('/api/stock-pnl', { cache: 'no-store' })
         if (!response.ok) throw new Error(`HTTP ${response.status}`)
         const next = (await response.json()) as Snapshot
         if (disposed) return
@@ -211,12 +218,20 @@ export function StockPnlCard({ onSaveCookie, onSaveFundKey }: StockPnlInjected):
           setSnapshot({ ...lastGood, stale: true, error: '暂时无法更新，显示上次数据' })
           setOffline(false)
         } else setOffline(true)
+      } finally {
+        running = false
+        if (!disposed) {
+          setUpdating(false)
+          timer = setTimeout(() => { void tick() }, interval)
+        }
       }
-      if (!disposed) timer = setTimeout(() => { void tick() }, interval)
     }
+    // Manual updates share this generation's last successful snapshot and request guard.
+    updateData.current = tick
     void tick()
     return () => {
       disposed = true
+      if (updateData.current === tick) updateData.current = null
       if (timer !== undefined) clearTimeout(timer)
     }
   }, [refreshKey])
@@ -557,6 +572,17 @@ export function StockPnlCard({ onSaveCookie, onSaveFundKey }: StockPnlInjected):
             </button>
             <button type="button" className={css.cancelBtn} onClick={() => { setEditing(false) }} disabled={saving}>
               取消
+            </button>
+            <button
+              type="button"
+              className={css.ghostBtn}
+              onClick={() => { void updateData.current?.() }}
+              disabled={updating || saving || acqBusy || acquiring || pendingSave}
+              aria-label="立即更新数据"
+              aria-busy={updating}
+              title="使用已保存的登录状态和组合，立即更新盈亏与指数"
+            >
+              {updating ? '更新中…' : '立即更新数据'}
             </button>
           </div>
           {saving && <div className={css.settingsStatus}>保存中...</div>}

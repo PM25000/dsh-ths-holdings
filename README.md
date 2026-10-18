@@ -63,6 +63,8 @@ If closing the window times out, profile cleanup continues when the browser actu
 
 Manual saves are unavailable while automatic login is starting or running; cancel automatic login and wait for it to end before saving manually. Pending writes continue to block new writes to the same credential reference after the plugin reloads within the same DSH process, until the old operation settles.
 
+Click **立即更新数据** in the expanded ⚙ settings to fetch P&L and the index immediately using the saved sign-in and selected portfolio. The button shows a loading state during the request; failures retain previous successful values and their original update time.
+
 **Manual (backup):**
 
 1. Open [https://tzzb.10jqka.com.cn](https://tzzb.10jqka.com.cn) and log in.

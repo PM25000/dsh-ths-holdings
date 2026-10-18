@@ -28,6 +28,7 @@ async function card(t: TestContext, options: { showAmount?: boolean; pct?: numbe
   const intervals = new Map<number, () => void>()
   const timeouts = new Map<number, () => void>()
   const statuses: Promise<AcquireStatusView>[] = []
+  const snapshots: Promise<unknown>[] = []
   const verifications: Promise<{ configured: boolean; valid: boolean; error?: string; reason?: string }>[] = []
   const calls: string[] = []
   const fundWrites: string[] = []
@@ -37,6 +38,7 @@ async function card(t: TestContext, options: { showAmount?: boolean; pct?: numbe
     fund: 'old-fund',
     snapshotError: options.error ?? '', snapshotOffline: options.offline ?? false,
     snapshotTime: '2026-09-23T00:00:00Z', indexUnavailable: false,
+    snapshotPct: options.pct ?? 0, snapshotYk: options.yk ?? 0,
     valid: undefined as boolean | undefined,
     startReply: undefined as Promise<AcquireStatusView> | undefined,
     save: async () => {},
@@ -55,7 +57,7 @@ async function card(t: TestContext, options: { showAmount?: boolean; pct?: numbe
       case '/api/stock-pnl/portfolios': value = [{ fund_key: host.fund, manualname: 'test', brokername: 'test' }]; break
       case '/api/stock-pnl':
         if (host.snapshotOffline) throw new Error('offline')
-        value = { pnl_pct: options.pct ?? 0, pnl_yk: options.yk ?? 0, sh_pct: 0, chart_data: [], updated_at: host.snapshotTime, error: host.snapshotError, index_unavailable: host.indexUnavailable, token_expired: false, poll_ms: 20_000 }
+        value = snapshots.shift() ?? { pnl_pct: host.snapshotPct, pnl_yk: host.snapshotYk, sh_pct: 0, chart_data: [], updated_at: host.snapshotTime, error: host.snapshotError, index_unavailable: host.indexUnavailable, token_expired: false, poll_ms: 20_000 }
         break
       default: assert.fail(`unexpected request: ${url}`)
     }
@@ -85,7 +87,8 @@ async function card(t: TestContext, options: { showAmount?: boolean; pct?: numbe
   })
   t.after(async () => { await act(async () => renderer.unmount()) })
   return {
-    host, stored, calls, fundWrites, statuses, verifications,
+    host, stored, calls, fundWrites, statuses, verifications, snapshots,
+    updateButton: () => renderer.root.findByProps({ 'aria-label': '立即更新数据' }),
     footer: () => renderer.root.findByProps({ className: 'footer' }).children.join(''),
     poll: () => act(async () => { const pending = [...timeouts.values()]; timeouts.clear(); for (const callback of pending) callback() }),
     text: () => JSON.stringify(renderer.toJSON()),
@@ -319,5 +322,59 @@ describe('previous successful card values during temporary failure', () => {
     h.verifications.push(Promise.resolve({ configured: true, valid: false, reason: 'blocked', error: '暂时无法验证登录状态，请稍后重试' }))
     await h.toggle()
     assert(h.text().includes('稍后重试')); assert(!h.text().includes('✗ 无效'))
+  })
+})
+
+
+describe('immediate data update in settings', () => {
+  it('queries immediately with saved settings and applies new values and time', async t => {
+    const h = await card(t, { pct: 2.5, yk: 100, showAmount: true })
+    await h.toggle()
+    const before = h.calls.filter(url => url === '/api/stock-pnl').length
+    const previousTime = h.footer()
+    h.host.snapshotPct = 3.5; h.host.snapshotYk = 140
+    h.host.snapshotTime = '2026-09-23T01:00:00Z'
+    await h.click('立即更新数据')
+    assert.equal(h.calls.filter(url => url === '/api/stock-pnl').length, before + 1)
+    assert.deepEqual(h.pnlParts(), ['¥+140.00', '(+3.50%)'])
+    assert.notEqual(h.footer(), previousTime)
+    assert.equal(h.updateButton().props.disabled, false)
+    assert.deepEqual(h.fundWrites, [])
+  })
+  it('disables while loading, coalesces repeated clicks, and resumes one poll timer', async t => {
+    const h = await card(t, { pct: 2.5 })
+    await h.toggle()
+    const before = h.calls.filter(url => url === '/api/stock-pnl').length
+    const previousTime = h.footer()
+    const pending = deferred<unknown>(); h.snapshots.push(pending.promise)
+    await h.click('立即更新数据')
+    assert.equal(h.updateButton().props.disabled, true)
+    assert.equal(h.updateButton().props['aria-busy'], true)
+    assert.equal(h.updateButton().children.join(''), '更新中…')
+    assert.equal(h.footer(), previousTime)
+    await act(async () => { h.updateButton().props.onClick(); h.updateButton().props.onClick() })
+    await h.poll()
+    assert.equal(h.calls.filter(url => url === '/api/stock-pnl').length, before + 1)
+    await act(async () => { pending.resolve({ pnl_pct: 3.5, pnl_yk: 140, sh_pct: 0, chart_data: [], updated_at: '2026-09-23T01:00:00Z', error: '', token_expired: false, poll_ms: 20000 }) })
+    assert.equal(h.updateButton().props.disabled, false)
+    assert.notEqual(h.footer(), previousTime)
+    await h.poll()
+    assert.equal(h.calls.filter(url => url === '/api/stock-pnl').length, before + 2)
+  })
+  it('keeps previous successful values and timestamp when a manual update fails', async t => {
+    const h = await card(t, { pct: 2.5, yk: 100, showAmount: true })
+    await h.toggle()
+    const before = h.pnlParts(), previousTime = h.footer()
+    h.host.snapshotTime = '2026-09-23T01:00:00Z'
+    h.host.snapshotError = '数据暂时无法获取，稍后自动重试'
+    await h.click('立即更新数据')
+    assert.deepEqual(h.pnlParts(), before)
+    assert.equal(h.footer(), previousTime)
+    assert.equal(h.updateButton().props.disabled, false)
+    h.host.snapshotOffline = true
+    await h.click('立即更新数据')
+    assert.deepEqual(h.pnlParts(), before)
+    assert.equal(h.footer(), previousTime)
+    assert.equal(h.updateButton().props.disabled, false)
   })
 })
