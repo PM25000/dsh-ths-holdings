@@ -12,6 +12,14 @@ The installed Desktop 0.2.0-rc.2 host has been verified with an isolated profile
 
 Registrations follow the plugin lifecycle. Disabling or uninstalling unregisters contributions; enabling or restarting restores them. Missing tools or skills services leave the card available and produce a diagnostic. No separate MCP server is required.
 
+## Ordinary chat discovery and invocation
+
+Type `/` in the chat composer to open candidates, or `/ths` to filter for `ths-portfolio-report`. Select it and send `/ths-portfolio-report Show my holdings and generate a brief report.` You can also ask the model explicitly to use this Skill.
+
+Both model and user invocation are enabled. Ordinary chat does not require the Schedule bundle. Isolated real-Desktop acceptance verifies the initial user-turn Skill catalog, loading instructions through the `skill` tool, querying positions, saving the report, and the composer's `skills/list` response. The model and ledger are synthetic fixtures.
+
+A visible catalog entry or loaded body establishes discovery and loading. `REQUEST_BLOCKED` from a portfolio tool means the live data request was refused by the gateway. A working website and a failing fixed-Cookie request still require comparison against the successful browser request; bounded retries do not guarantee recovery from sustained rejection.
+
 ## Credentials and portfolio selection
 
 Sign in and select a portfolio through the card settings. The host credential service owns the Cookie; it never belongs in a Skill, scheduled prompt, or tool arguments.

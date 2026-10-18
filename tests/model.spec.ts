@@ -20,6 +20,8 @@ describe('installed model capabilities', () => {
         const skill = await ctx.skills.get('ths-portfolio-report')
         assert(skill?.content.includes('ths_get_positions'))
         assert.equal(skill?.source, 'bundled')
+        assert.equal(skill?.invocation.modelInvocable, true)
+        assert.equal(skill?.invocation.userInvocable, true)
         const result = await ctx.tools.execute({ callId: 'fixture-' + n, name: 'ths_get_positions', arguments: {}, signal: new AbortController().signal })
         assert.equal(result.isError, false)
         const data = JSON.parse(result.content.filter(c => c.type === 'text').map(c => c.text).join(''))

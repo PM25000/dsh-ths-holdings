@@ -12,6 +12,16 @@
 
 插件跟随宿主的 tools、skills 服务生命周期挂载。禁用或卸载会注销贡献，重新启用或宿主重启会重新注册。服务缺失时卡片可继续使用，插件日志提示缺少的能力。无需单独启动 MCP 服务。
 
+## 普通聊天中查看与调用 Skill
+
+在普通聊天输入框输入 `/` 查看候选项，输入 `/ths` 筛选 `ths-portfolio-report`。选择后可发送：
+
+> /ths-portfolio-report 查看我的持仓，生成简报。
+
+也可以明确要求模型“使用 ths-portfolio-report 查询持仓”。插件同时开放模型调用与用户调用；普通聊天不依赖 Schedule bundle。真实 Desktop 的隔离验收已验证：普通用户消息首轮包含 Skill 目录、`skill` 工具能加载正文、持仓工具能完成查询、报告能保存，以及输入框所用 `skills/list` 接口包含该 Skill。验收模型与账本为合成测试源。
+
+Skill 出现在列表或加载了正文，只证明发现与加载成功。若持仓工具返回 `REQUEST_BLOCKED`，表示真实数据接口仍被网关拒绝，不代表 Skill 未挂载。网页正常而固定 Cookie 请求受拒绝时，仍需对照网页实际成功请求；有限重试不能保证恢复。
+
 ## 登录与账本选择
 
 使用卡片设置完成同花顺登录并选择账本。Cookie 由宿主凭据服务保存和读取，不放入 Skill、任务提示或工具参数。
@@ -86,7 +96,7 @@
 - `pnpm typecheck`、`pnpm build`：类型与插件构建。
 - PR 自动检查在 Node 22、24 上运行类型检查、测试和安装包验收，不访问真实账本或凭据。
 - `pnpm test:package`：重新构建并打包，在新目录安装实际 tgz，改变工作目录，验证自动挂载、查询、卸载和两次宿主启动。
-- `pnpm test:desktop-compat`：使用已安装 Desktop 的真实宿主和隔离 profile；记录手动功能与 Schedule 能力，不修改日常配置。
+- `pnpm test:desktop-compat`：使用已安装 Desktop 的真实宿主和隔离 profile；记录普通聊天的 Skill 目录、正文加载、查询、斜杠菜单和 Schedule 能力，不修改日常配置。
 - `node tests/desktop-compat.smoke.cjs --require-schedule`：强制要求该 Desktop profile 同时提供 Schedule；当前隔离验收 profile 的默认 bundle 组合会明确失败并指出缺少 schedule。
 - `node tests/desktop-compat.smoke.cjs --with-schedule --require-schedule`：在隔离 profile 加入官方 Schedule bundle，强制验收 Desktop 的完整定时报告链路。
 - 设置 `DSH_SOURCE_ROOT` 为已构建的 DSH checkout，然后运行 `pnpm test:schedule`：使用真实 Web profile、调度服务和 Agent 循环，验证冷会话恢复、Skill 加载、持仓查询与报告持久化。模型和账本为合成测试源；这不等于真实模型质量评估。

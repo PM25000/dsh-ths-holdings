@@ -150,6 +150,21 @@ globalThis.fetch = (input, init) => {
     const positionResult=JSON.parse(capabilities.result.content.filter(c=>c.type==='text').map(c=>c.text).join(''));
     assert.equal(positionResult.status,'ok',JSON.stringify(positionResult));
     assert.equal(positionResult.data.positions[0].name,'示例完整名称');
+    const chat = await json('/api/ths-compat/chat');
+    fs.writeFileSync(path.join(root, 'ordinary-chat-verification.json'), JSON.stringify(chat, null, 2));
+    assert.equal(chat.userPrompt, true);
+    assert.equal(chat.catalogVisible, true);
+    assert.equal(chat.bodyLoaded, true);
+    assert.equal(chat.positionsQueried, true);
+    assert.equal(chat.reportPersisted, true);
+    const skillMenu = await json('/api/skills/list', {
+      type: 'client-request', rpcId: 'ths-chat-skill-menu', method: 'skills/list', payload: { args: { request: { sessionId: chat.sessionId } } },
+    });
+    assert.equal(skillMenu.result?.ok, true, JSON.stringify(skillMenu));
+    const listedSkill = skillMenu.result.value.skills.find(skill => skill.name === 'ths-portfolio-report');
+    assert(listedSkill, 'The ordinary composer / menu lists the bundled Skill');
+    assert.equal(listedSkill.modelInvocable, true);
+    fs.writeFileSync(path.join(root, 'skill-menu-verification.json'), JSON.stringify({ skill: listedSkill.name, modelInvocable: listedSkill.modelInvocable, slashMenuVisible: true }, null, 2));
     const scheduling=await json('/api/ths-compat/schedule');
     fs.writeFileSync(path.join(root,'schedule-verification.json'),JSON.stringify(scheduling,null,2));
     if (scheduling.supported) {
@@ -179,7 +194,7 @@ globalThis.fetch = (input, init) => {
     assert.equal((await request('/api/stock-pnl/cookie', { value: ';;;' })).status, 400);
     assert.equal((await json('/api/stock-pnl/verify')).valid, true);
     assert.ok(!stderr.includes('skipping profile bundle "dsh-ths-holdings"'));
-    console.log(JSON.stringify({ host: runtimeVersion, plugin: entry.fiberPhase, skillMounted:true, modelTools:3, positionQuery:true, coldScheduleReport:scheduling.supported, missingScheduleServices:scheduling.missing??[], gatewayRecovery: true, sustainedGatewayFailureSanitized: true, gatewayRefusals, credentialSave: true,
+    console.log(JSON.stringify({ host: runtimeVersion, plugin: entry.fiberPhase, skillMounted:true, modelTools:3, positionQuery:true, ordinaryChat:true, ordinaryChatCatalog:chat.catalogVisible, slashMenuVisible:true, ordinaryChatWithoutSchedule:!chat.scheduleServicePresent, coldScheduleReport:scheduling.supported, missingScheduleServices:scheduling.missing??[], gatewayRecovery: true, sustainedGatewayFailureSanitized: true, gatewayRefusals, credentialSave: true,
       verification: true, portfolios: portfolios.length, snapshot: true, exemptionRequired: false }));
     if (process.argv.includes('--serve')) {
       // A private local handoff for manual UI verification; never print the authenticated URL.
