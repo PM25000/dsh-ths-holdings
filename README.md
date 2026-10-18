@@ -8,8 +8,6 @@
   <a href="https://www.npmjs.com/package/dsh-ths-holdings"><img src="https://img.shields.io/npm/dt/dsh-ths-holdings?style=flat-square" alt="npm version"></a>
 </p>
 
-Unreleased: this branch adds automatically registered read-only DSH tools and the bundled ths-portfolio-report Skill for manual and scheduled portfolio reports. See the [automation guide](docs/automation.md). Published 0.2.2 does not include this feature.
-
 English | [中文](README.zh.md)
 
 A floating **position P&L card** for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH) Desktop and Web. It automatically syncs your **real portfolio data** from the [Tonghuashun investment-ledger](https://tzzb.10jqka.com.cn) (同花顺投资账本) — no manual stock picking. Displays **今日盈亏** (today's P&L), **上证指数** (Shanghai Composite Index), and an intraday mini chart, all in the A-share red-up/green-down convention.
@@ -22,7 +20,9 @@ Unlike watchlist tools, this plugin reads your **actual positions** and shows yo
 
 ## Version compatibility
 
-Plugin **0.2.2** targets the DSH **0.2 series** and has been tested with Desktop **0.2.0-rc.2**, without a compatibility exemption. For DSH 0.1, keep plugin **0.2.0**; this migration does not support the older host.
+Plugin **0.3.0** targets the DSH **0.2 series** and has been tested with Desktop **0.2.0-rc.2**, without a compatibility exemption. For DSH 0.1, keep plugin **0.2.0**; this migration does not support the older host.
+
+**0.3.0** adds holdings queries in ordinary chat, scheduled portfolio reports, and **立即更新数据** (Refresh now), along with network stability fixes.
 
 ## Installation
 
@@ -57,12 +57,6 @@ Desktop and Web manage their plugins separately; use the installation method for
 4. When the sign-in succeeds the window closes itself, the Cookie is saved automatically, and the card refreshes with your portfolio.
 5. The plugin auto-discovers your portfolio — if you have several, pick one from the dropdown. Done.
 
-> Auto-acquire uses a temporary browser profile and reads cookies through browser-level commands. It does not attach a page debugger, inject scripts, or emulate viewport dimensions. Only cookies for `10jqka.com.cn` and its subdomains are saved; the temporary profile is deleted after the browser exits. You do not need to open developer tools during sign-in.
-
-If closing the window times out, profile cleanup continues when the browser actually exits. Cleanup failures remain visible in settings with a retry button. Cookie saves wait up to 30 seconds; a timeout or cancellation closes the login window, but an already submitted storage operation may still complete. The card shows that the result is unconfirmed and blocks additional saves until that operation settles, preventing an older request from overwriting a newer Cookie.
-
-Manual saves are unavailable while automatic login is starting or running; cancel automatic login and wait for it to end before saving manually. Pending writes continue to block new writes to the same credential reference after the plugin reloads within the same DSH process, until the old operation settles.
-
 Click **立即更新数据** in the expanded ⚙ settings to fetch P&L and the index immediately using the saved sign-in and selected portfolio. The button shows a loading state during the request; failures retain previous successful values and their original update time.
 
 **Manual (backup):**
@@ -82,6 +76,26 @@ The session cookie expires eventually — when it does, the card shows a **Token
 >
 > ![Data upload tutorial](assets/update.png)
 
+## Query holdings in chat
+
+Installing and enabling the plugin automatically makes the bundled `ths-portfolio-report` Skill available in ordinary chat and scheduled tasks. No separate Skill installation or MCP server is needed. Sign-in and portfolio selection use the card settings; you do not need to find or enter a portfolio ID.
+
+After signing in, simply say in DSH chat:
+
+> Show my holdings in Tonghuashun Investment Ledger.
+
+The assistant uses the selected portfolio. If several are available and none is selected, choose by name when asked. You can also say “Show holdings from my ‘Long-term investments’ portfolio in Tonghuashun Investment Ledger.”
+
+Reports default to an asset overview, the full holdings table and the largest positions. They include security names and codes, quantities, cost and current prices, market values, portfolio weights, holding P&L and daily P&L. Query time and ledger upload time are shown separately; missing data is identified rather than treated as zero.
+
+## Schedule reports
+
+For example, say:
+
+> Every weekday at 4:30 p.m. Beijing time, check my holdings in Tonghuashun Investment Ledger and generate a holdings and P&L report. Keep this task linked to the currently selected portfolio.
+
+Have the assistant confirm the portfolio name and next run time. Scheduled reports require a running DSH host with Schedule enabled. Weekday rules do not automatically exclude exchange holidays.
+
 ## Features
 
 - **📊 Real-time position P&L** — polls every 20 s (configurable) from your actual portfolio
@@ -95,102 +109,26 @@ The session cookie expires eventually — when it does, the card shows a **Token
 - **⚙ In-place settings** — paste Cookie and select portfolio from the card itself
 - **🔒 Credential-safe** — the Cookie never leaves the host process
 
-## How it works
-
-```text
-┌─────────────── Web browser ───────────────┐
-│  lib/client.js (browser module)           │
-│  · shell.overlay slot → floating card      │
-│  · React + CSS Modules                     │
-│  · config in localStorage                  │
-│          │ fetch (same-origin)             │
-└──────────┼─────────────────────────────────┘
-           ▼
-┌─────────────── DSH Host (lib/index.js) ───┐
-│  cordis plugin: webServer routes          │
-│  · GET /api/stock-pnl          snapshot    │
-│  · GET /api/stock-pnl/portfolios  accounts │
-│  · GET /api/stock-pnl/verify     cookie ok?│
-│  · POST /api/stock-pnl/acquire*   sign-in │
-│  resolves Cookie via ctx.credentials      │
-│  auto-discovers user_id + fund_key        │
-│  POSTs Tonghuashun ledger APIs            │
-└───────────────────────────────────────────┘
-```
-
-The node half reads the login Cookie per request through the credential-reference seam (`ctx.credentials`). Manually pasted values are submitted to the host and never returned after saving; automatically acquired values stay on the host. Credential-bearing requests never follow a redirect.
-
-Auto-acquire runs a host state machine (`acquire.ts`): open a system Edge / Chrome window, wait for a `userid` cookie, save ledger-domain cookies and close the window. `login-browser.ts` uses a dedicated pipe with browser-level commands, without opening a debugging port or enabling page Runtime / Debugger sessions. It does not read page contents; the user sees any site refusal directly. Cancellation, timeout, early closure and save failures are handled explicitly. Manual saves use the plugin's same-origin POST routes (`/api/stock-pnl/cookie` and `/api/stock-pnl/fund-key`), respect configured credential references, and no longer depend on DSH's legacy `connection.api.credentials` interface.
-
-The network layer prepares temporary request state before each request and retry without rewriting stored login credentials. Unrecognized formats retain the original request. This compatibility handling adds no background requests and does not replace signing in again when the session expires.
-
-## Config
-
-| Key | Default | Meaning |
-|---|---|---|
-| `cookieEnv` | `STOCK_PNL_COOKIE` | Credential reference holding the ledger Cookie. |
-| `fundKeyEnv` | `STOCK_PNL_FUND_KEY` | Credential reference holding the ledger fund key (saved from the card's ⚙ form). |
-| `user_id` | the Cookie's `userid` | The ledger user id, included in every form payload; an empty value falls back to the Cookie's own `userid`. |
-| `fund_key` | auto-discovered | The ledger fund key selecting the managed portfolio; overridden by the `fundKeyEnv` credential when set, auto-discovered only when a single account is available; multiple accounts require selection. |
-| `pnlUrl` | Tonghuashun `time_share` endpoint | P&L endpoint override (tests point at a scripted server). |
-| `indexUrl` | Tonghuashun `getQuotes` endpoint | Index endpoint override (tests point at a scripted server). |
-| `pollMs` | `20000` | Card poll interval in milliseconds. |
-| `requestTimeoutMs` | `15000` | Model query or card acquisition deadline, 100–120000 ms. |
-
-## Directory structure
-
-```
-dsh-ths-holdings/
-├── src/
-│   ├── index.ts            # node half: webServer routes + credential resolution
-│   ├── fetch.ts            # Tonghuashun ledger API calls + auto-discovery + cookie verify
-│   ├── acquire.ts          # cookie acquisition state machine
-│   ├── login-browser.ts    # system browser launch and cookie access
-│   ├── settings.ts         # write-only cookie / portfolio routes
-│   └── client/
-│       ├── index.ts        # browser half: shell.overlay registration
-│       └── StockPnlCard.tsx
-├── lib/                    # built artifacts (index.js + client.js)
-├── cordis.patch.yml        # dsh.bundle patch layer
-├── package.json            # dsh.bundle + dsh.client manifests
-├── tests/                  # ledger / verify / acquire unit tests
-└── README.md
-```
-
 ## FAQ / Troubleshooting
 
 | Symptom | Cause & fix |
 |---|---|
 | Card shows `请配置 Cookie` | `STOCK_PNL_COOKIE` is empty — click **auto-acquire** in the ⚙ panel, or paste manually. |
 | Card shows `Token 已过期` | Re-acquire the cookie or copy the Cookie request header using the manual steps above. |
-| Saving reports `Cannot read properties of undefined (reading 'credentials')` | The old plugin used a changed DSH client interface. Install the fix, restart `dsh web`, and refresh the DSH page. |
 | F12 has no effect | Click the browser's top-right menu → More tools → Developer tools, then follow the manual steps. |
 | Login page says developer tools are unsupported | Auto-acquire does not require developer tools. For manual acquisition, check already recorded ledger requests in Network; if no usable Cookie is available, use auto-acquire. |
-| Popped window shows `Nginx forbidden` | The Tonghuashun WAF intermittently refuses automation — F5 in the window or open the ledger URL manually, then click **「我已登录，继续 →」**. |
 | No portfolio in the dropdown | The account list needs a valid Cookie first; save the Cookie, then click ↻ to refresh. |
 | Multiple portfolios | Select the one you want from the dropdown — the choice is saved as `STOCK_PNL_FUND_KEY`. |
 | Cookie pasted with line breaks | The plugin strips whitespace on save, so wrapped lines are fine. |
-
-## Model Experience
-
-When tools and skills services are present, the plugin automatically contributes ths_list_portfolios, ths_get_positions, ths_get_pnl, and the bundled ths-portfolio-report Skill. The card itself contributes no prompt.
-
-#### KV Cache effect
-
-Three stable tool schemas and one short Skill catalog entry are added. Skill instructions load on demand; full holdings enter context only when queried.
+| “稍后重试” or “数据暂时无法获取” | Wait and retry. The card may retain previous successful values; check the displayed update time. |
+| The assistant cannot query holdings | Check that the plugin is enabled and sign-in is complete. Fully restart DSH, then try again. |
+| The report fails while the card still has values | The card may be showing an earlier snapshot. Reports treat the current query as failed and do not reuse old results. |
 
 ## Known Limitations
 
-- **The ledger API is an undocumented, login-gated endpoint** — its response format can change and the Cookie expires. Intermittent 403 responses get bounded transport recovery. On persistent failure the card retains its previous successful values and original update time; explicit login expiry still requires signing in again.
-- **The portfolio list endpoint (`account_list`) requires the Cookie to be saved first** — the portfolio selector appears after you paste a valid Cookie.
 - **Auto-acquire uses a system browser** — no Playwright installation is needed. Edge or Chrome must be installed and the host must have a visible desktop session; otherwise use manual paste.
-- **No server-side polling** — the route fetches on each request and the card polls at the configured `pollMs` interval; there is no shared cache or push channel.
-
-## Local validation
-
-`npm test`, `npm run typecheck`, and `npm run build` run the regression suite, check types, and build the plugin. `npm run test:browser` opens an isolated browser against a local fixture to verify Cookie access and cleanup.
-
-`npm run test:desktop-compat` uses an installed Desktop's real runtime with an isolated profile. It checks plugin admission, credential writes and reads, Cookie validation, portfolio selection, and P&L routes. Ledger responses come from a local fixture; no real account or existing DSH configuration is used. The default paths target a standard Windows installation; override them with `DSH_DESKTOP_EXECUTABLE` and `DSH_DESKTOP_RESOURCES` for other locations. Run the test script directly with `--serve` to keep it available for UI checks. Test directories live under `dist/desktop-compat-*`. Real ledger sign-in and holdings still require account-level verification.
+- Reports currently support ordinary CNY portfolios holding Shanghai/Shenzhen stocks and ETFs. Margin accounts, short positions, B shares and other markets are outside the supported scope.
+- Enter login information only in plugin settings, not in chat or scheduled prompts.
 
 ## License
 
