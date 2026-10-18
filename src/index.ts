@@ -7,7 +7,8 @@
  * @module @deepseek-ai/dsh-client-ui-stock-pnl
  */
 
-import type { Context } from '@deepseek-ai/cordis'
+import type { Context, Volatile } from '@deepseek-ai/cordis'
+import type {} from '@deepseek-ai/dsh-settings'
 import z from '@deepseek-ai/schemastery'
 import { credentialRef } from '@deepseek-ai/dsh-credentials'
 import type { WebRoute } from '@deepseek-ai/dsh-host-webserver'
@@ -16,6 +17,7 @@ import { settingHandler } from './settings.ts'
 import { collectStats, cookieField, INDEX_URL, normalizeCookie, PNL_URL, type Portfolio, verifyCookie } from './fetch.ts'
 import type { Stats } from './types.ts'
 import { LedgerClient } from './ledger.ts'
+import { DEFAULT_POLL_MS, MAX_POLL_MS } from './preferences.ts'
 import type {} from '@deepseek-ai/dsh-tools'
 import type {} from '@deepseek-ai/dsh-skill'
 
@@ -41,19 +43,28 @@ export interface Config {
   indexUrl?: string
   /** Poll interval the card should use, in milliseconds; defaults to 20000. */
   pollMs?: number
+  /** Whether the floating card is visible; reporting tools stay available. */
+  showCard?: boolean
   /** Overall deadline for a card snapshot or model query, including recovery. */
   requestTimeoutMs?: number
 }
 
+/** Loader resolves live settings into references without restarting this plugin. */
+export interface LiveConfig extends Omit<Required<Config>, 'pollMs' | 'showCard'> {
+  pollMs: Volatile<number>
+  showCard: Volatile<boolean>
+}
+
 /** Schemastery config for the overlay route. */
-export const Config: z<Config> = z.object({
+export const Config: z<Config, LiveConfig> = z.object({
   cookieEnv: z.string().default('STOCK_PNL_COOKIE'),
   fundKeyEnv: z.string().default('STOCK_PNL_FUND_KEY'),
   user_id: z.string().default(''),
   fund_key: z.string().default(''),
   pnlUrl: z.string().default(PNL_URL),
   indexUrl: z.string().default(INDEX_URL),
-  pollMs: z.number().min(1000).default(20000),
+  pollMs: z.number().min(1000).max(MAX_POLL_MS).step(1).default(DEFAULT_POLL_MS).volatile(),
+  showCard: z.boolean().default(true).volatile(),
   requestTimeoutMs: z.number().min(100).max(120000).default(15000),
 })
 
@@ -70,7 +81,7 @@ interface ResolvedConfig {
 }
 
 /** Resolve defaults the same way Schemastery would, so direct `apply` calls stay correct. */
-function resolveConfig(config: Config): ResolvedConfig {
+function resolveConfig(config: Config | LiveConfig): ResolvedConfig {
   return {
     cookieEnv: config.cookieEnv ?? 'STOCK_PNL_COOKIE',
     fundKeyEnv: config.fundKeyEnv ?? 'STOCK_PNL_FUND_KEY',
@@ -78,7 +89,7 @@ function resolveConfig(config: Config): ResolvedConfig {
     fund_key: config.fund_key ?? '',
     pnlUrl: config.pnlUrl ?? PNL_URL,
     indexUrl: config.indexUrl ?? INDEX_URL,
-    pollMs: config.pollMs ?? 20000,
+    get pollMs() { return typeof config.pollMs === 'object' ? config.pollMs.get() : config.pollMs ?? DEFAULT_POLL_MS },
     requestTimeoutMs: config.requestTimeoutMs ?? 15000,
   }
 }
@@ -122,8 +133,11 @@ function writeJson<T>(res: RouteResponse, status: number, value: T): void {
  * @param ctx - Cordis context carrying the `webServer` and `credentials` services.
  * @param config - plugin config.
  */
-export function apply(ctx: Context, config: Config = {}): void {
+export function apply(ctx: Context, config: Config | LiveConfig = {}): void {
   const spec = resolveConfig(config)
+  ctx.inject(['settings'], child => {
+    child.effect(() => child.settings.configure({ auto: false }, ctx.fiber))
+  })
   const ledger = new LedgerClient(spec, ref => resolveCredential(ctx, ref))
   ctx.inject(['tools', 'skills'], async modelCtx => {
     const model = await import('./model.ts')
