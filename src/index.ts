@@ -13,8 +13,11 @@ import { credentialRef } from '@deepseek-ai/dsh-credentials'
 import type { WebRoute } from '@deepseek-ai/dsh-host-webserver'
 import { CookieAcquirer } from './acquire.ts'
 import { settingHandler } from './settings.ts'
-import { collectStats, cookieField, fetchFundKey, INDEX_URL, listPortfolios, normalizeCookie, PNL_URL, type Portfolio, verifyCookie } from './fetch.ts'
+import { collectStats, cookieField, INDEX_URL, normalizeCookie, PNL_URL, type Portfolio, verifyCookie } from './fetch.ts'
 import type { Stats } from './types.ts'
+import { LedgerClient } from './ledger.ts'
+import type {} from '@deepseek-ai/dsh-tools'
+import type {} from '@deepseek-ai/dsh-skill'
 
 export const name = 'ui-stock-pnl'
 export const inject = ['webServer', 'credentials']
@@ -38,6 +41,8 @@ export interface Config {
   indexUrl?: string
   /** Poll interval the card should use, in milliseconds; defaults to 20000. */
   pollMs?: number
+  /** Overall deadline for a card snapshot or model query, including recovery. */
+  requestTimeoutMs?: number
 }
 
 /** Schemastery config for the overlay route. */
@@ -49,6 +54,7 @@ export const Config: z<Config> = z.object({
   pnlUrl: z.string().default(PNL_URL),
   indexUrl: z.string().default(INDEX_URL),
   pollMs: z.number().min(1000).default(20000),
+  requestTimeoutMs: z.number().min(100).max(120000).default(15000),
 })
 
 /** Fully materialized route policy; defaulting happens here, never inline. */
@@ -60,6 +66,7 @@ interface ResolvedConfig {
   pnlUrl: string
   indexUrl: string
   pollMs: number
+  requestTimeoutMs: number
 }
 
 /** Resolve defaults the same way Schemastery would, so direct `apply` calls stay correct. */
@@ -72,13 +79,24 @@ function resolveConfig(config: Config): ResolvedConfig {
     pnlUrl: config.pnlUrl ?? PNL_URL,
     indexUrl: config.indexUrl ?? INDEX_URL,
     pollMs: config.pollMs ?? 20000,
+    requestTimeoutMs: config.requestTimeoutMs ?? 15000,
   }
 }
 
 /** Resolve one credential-reference value through the seam; `undefined` when unconfigured. */
-async function resolveCredential(ctx: Context, ref: string): Promise<string | undefined> {
-  const resolved = await ctx.credentials.resolve(credentialRef(ref))
-  return resolved?.value
+async function resolveCredential(ctx: Context, ref: string, signal?: AbortSignal): Promise<string | undefined> {
+  if (!signal) return (await ctx.credentials.resolve(credentialRef(ref)))?.value
+  signal.throwIfAborted()
+  let cancel!: () => void
+  const aborted = new Promise<never>((_resolve, reject) => {
+    cancel = () => reject(signal.reason)
+    signal.addEventListener('abort', cancel, { once: true })
+  })
+  try {
+    const resolved = await Promise.race([ctx.credentials.resolve(credentialRef(ref)), aborted])
+    signal.throwIfAborted()
+    return resolved?.value
+  } finally { signal.removeEventListener('abort', cancel) }
 }
 
 /** The web server's response type, derived from the route contract (no node import). */
@@ -106,12 +124,20 @@ function writeJson<T>(res: RouteResponse, status: number, value: T): void {
  */
 export function apply(ctx: Context, config: Config = {}): void {
   const spec = resolveConfig(config)
+  const ledger = new LedgerClient(spec, ref => resolveCredential(ctx, ref))
+  ctx.inject(['tools', 'skills'], async modelCtx => {
+    const model = await import('./model.ts')
+    await model.apply(modelCtx, { client: ledger })
+  })
+  if (!ctx.get('tools') || !ctx.get('skills')) ctx.logger.warn('报告 Skill 等待 tools、skills 服务；请检查当前宿主组合。卡片保持可用。')
   const route: WebRoute = {
     kind: 'exact',
     path: ROUTE_PATH,
     handler: async (_req, res) => {
       try {
-        const cookie = await resolveCredential(ctx, spec.cookieEnv)
+        // One deadline covers credentials, optional discovery and both quote requests.
+        const signal = AbortSignal.timeout(spec.requestTimeoutMs)
+        const cookie = await resolveCredential(ctx, spec.cookieEnv, signal)
 
         // Derive the ledger user id (same fallback as collectStats) so we can
         // call the account_list API when fund_key has not yet been stored.
@@ -123,12 +149,19 @@ export function apply(ctx: Context, config: Config = {}): void {
           ? spec.user_id
           : (cookieField(normalizeCookie(cookie ?? ''), 'userid') ?? '')
 
-        // fund_key: credential store → auto-discover from account_list → config default
-        const fundKeyCred = await resolveCredential(ctx, spec.fundKeyEnv)
+        // fund_key: saved credential → config default → sole available account
+        const fundKeyCred = await resolveCredential(ctx, spec.fundKeyEnv, signal)
         let fundKey = fundKeyCred ?? spec.fund_key
-        if (!fundKeyCred && cookie && resolvedUser) {
-          const discovered = await fetchFundKey(cookie, resolvedUser)
-          if (discovered !== undefined) fundKey = discovered
+        if (!fundKey && cookie && resolvedUser) {
+          const result = await ledger.list(signal)
+          if (result.data === null) throw new Error(result.code)
+          const accounts = result.data.portfolios
+          if (accounts.length !== 1) {
+            writeJson(res, 200, { pnl_pct: 0, pnl_yk: 0, sh_pct: 0, chart_data: [], updated_at: new Date().toISOString(),
+              error: accounts.length === 0 ? '当前登录没有可用账本' : '存在多个账本，请在设置中选择账本', token_expired: false, poll_ms: spec.pollMs })
+            return
+          }
+          fundKey = accounts[0]!.id
         }
 
         const stats = await collectStats({
@@ -138,6 +171,8 @@ export function apply(ctx: Context, config: Config = {}): void {
           cookieEnv: spec.cookieEnv,
           user_id: spec.user_id,
           fund_key: fundKey,
+          signal,
+          requestTimeoutMs: spec.requestTimeoutMs,
         })
         writeJson(res, 200, { ...stats, poll_ms: spec.pollMs })
       } catch (error) {
@@ -165,8 +200,9 @@ export function apply(ctx: Context, config: Config = {}): void {
           ? spec.user_id
           : (cookieField(normalizeCookie(cookie), 'userid') ?? '')
         if (!user_id) { writeJson(res, 200, [] as readonly Portfolio[]); return }
-        const list = await listPortfolios(cookie, user_id)
-        writeJson(res, 200, list)
+        const result = await ledger.list(new AbortController().signal)
+        if (result.data === null) { writeJson(res, 502, { error: result.code, message: result.message }); return }
+        writeJson(res, 200, result.data.portfolios.map(row => ({ fund_key: row.id, manualname: row.name, brokername: row.broker })))
       } catch (error) {
         ctx.logger.warn(error instanceof Error ? error : new Error(String(error)))
         if (res.headersSent) { res.destroy(); return }
@@ -204,6 +240,7 @@ export function apply(ctx: Context, config: Config = {}): void {
       writeJson(res, 200, {
         configured: cookie !== undefined && cookie.length > 0,
         valid: result.valid,
+        reason: result.reason,
         ...(result.error !== undefined ? { error: result.error } : {}),
         ...(result.hint !== undefined ? { hint: result.hint } : {}),
         ...(result.portfolios !== undefined ? { portfolios: result.portfolios } : {}),

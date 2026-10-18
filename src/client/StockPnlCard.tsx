@@ -22,11 +22,15 @@ interface Snapshot {
   updated_at: string
   error: string
   token_expired: boolean
+  index_unavailable?: boolean
+  /** Local presentation only: previous successful values retain their original timestamp. */
+  stale?: boolean
   poll_ms: number
 }
 
 /** The `/api/stock-pnl/verify` payload subset the card renders. */
 interface VerifyView {
+  reason?: string
   configured: boolean
   valid: boolean
   error?: string
@@ -120,6 +124,8 @@ export function StockPnlCard({ onSaveCookie, onSaveFundKey }: StockPnlInjected):
   const [saveError, setSaveError] = useState<string | null>(null)
   const [saved, setSaved] = useState(false)
   const [refreshKey, setRefreshKey] = useState(0)
+  const [updating, setUpdating] = useState(false)
+  const updateData = useRef<(() => Promise<void>) | null>(null)
   // Portfolio list and the currently selected fund_key.
   const [portfolios, setPortfolios] = useState<readonly PortfolioInfo[]>([])
   const [portfoliosLoading, setPortfoliosLoading] = useState(false)
@@ -171,6 +177,8 @@ export function StockPnlCard({ onSaveCookie, onSaveFundKey }: StockPnlInjected):
 
   /** The inline style that pins the card to a dragged `top`; `undefined` uses the CSS default. */
   const cardStyle = top === null ? undefined : { top: `${top}px`, bottom: 'auto' }
+  const unavailable = offline || snapshot === null || snapshot.error !== '' && !snapshot.stale
+  const indexUnavailable = unavailable || snapshot?.index_unavailable === true
 
   useEffect(() => {
     mounted.current = true
@@ -180,25 +188,50 @@ export function StockPnlCard({ onSaveCookie, onSaveFundKey }: StockPnlInjected):
   useEffect(() => {
     let disposed = false
     let timer: ReturnType<typeof setTimeout> | undefined
+    let lastGood: Snapshot | null = null
+    let running = false
+    // A new refresh generation follows a credential/portfolio change: never reuse the old account.
+    setSnapshot(null)
+    setOffline(false)
     const tick = async (): Promise<void> => {
+      if (disposed || running) return
+      running = true
+      if (timer !== undefined) clearTimeout(timer)
+      setUpdating(true)
       let interval = DEFAULT_POLL_MS
       try {
-        const response = await fetch('/api/stock-pnl')
+        const response = await fetch('/api/stock-pnl', { cache: 'no-store' })
         if (!response.ok) throw new Error(`HTTP ${response.status}`)
         const next = (await response.json()) as Snapshot
         if (disposed) return
         interval = Number.isFinite(next.poll_ms) && next.poll_ms > 0 ? next.poll_ms : DEFAULT_POLL_MS
-        setSnapshot(next)
+        if (next.error === '' && !next.index_unavailable) {
+          lastGood = next
+          setSnapshot(next)
+        } else {
+          setSnapshot(lastGood ? { ...lastGood, stale: true, error: next.error || '指数暂未更新，显示上次数据', token_expired: next.token_expired, poll_ms: next.poll_ms } : next)
+        }
         setOffline(false)
       } catch {
         if (disposed) return
-        setOffline(true)
+        if (lastGood) {
+          setSnapshot({ ...lastGood, stale: true, error: '暂时无法更新，显示上次数据' })
+          setOffline(false)
+        } else setOffline(true)
+      } finally {
+        running = false
+        if (!disposed) {
+          setUpdating(false)
+          timer = setTimeout(() => { void tick() }, interval)
+        }
       }
-      if (!disposed) timer = setTimeout(() => { void tick() }, interval)
     }
+    // Manual updates share this generation's last successful snapshot and request guard.
+    updateData.current = tick
     void tick()
     return () => {
       disposed = true
+      if (updateData.current === tick) updateData.current = null
       if (timer !== undefined) clearTimeout(timer)
     }
   }, [refreshKey])
@@ -223,8 +256,8 @@ export function StockPnlCard({ onSaveCookie, onSaveFundKey }: StockPnlInjected):
         const list = (await resp.json()) as readonly PortfolioInfo[]
         if (disposed) return
         setPortfolios(list)
-        // Auto-select the first portfolio when none has been stored yet.
-        if (list.length > 0 && !localStorage.getItem('stock-pnl-fund-key')) {
+        // Multiple portfolios require an explicit choice, including on the first panel open.
+        if (list.length === 1 && !localStorage.getItem('stock-pnl-fund-key')) {
           const first = list[0]!
           await onSaveFundKey(first.fund_key)
           setPortfolioFundKey(first.fund_key)
@@ -392,10 +425,10 @@ export function StockPnlCard({ onSaveCookie, onSaveFundKey }: StockPnlInjected):
         onPointerUp={endDrag}
         onPointerCancel={endDrag}
         aria-label="展开今日盈亏"
-        title="点击展开"
+        title={snapshot?.stale ? '显示上次数据，请展开查看更新时间' : '点击展开'}
       >
         <span className={css.pillLabel}>今日盈亏</span>
-        <span className={clsx(css.pillValue, css.pnlValue)}><PnlValue pct={pnl} yk={yk} showAmount={showAmount} offline={offline} /></span>
+        <span className={clsx(css.pillValue, css.pnlValue)}><PnlValue pct={pnl} yk={yk} showAmount={showAmount} offline={unavailable} /></span>
       </button>
     )
   }
@@ -418,7 +451,7 @@ export function StockPnlCard({ onSaveCookie, onSaveFundKey }: StockPnlInjected):
           title="点击收起"
         >
           <span className={css.headerLabel}><span className={css.collapseHint}>▾</span>今日盈亏</span>
-          <span className={clsx(css.value, css.pnlValue, colorClass(pnlSign) === 'up' && css.up, colorClass(pnlSign) === 'down' && css.down)}><PnlValue pct={pnl} yk={yk} showAmount={showAmount} offline={offline} /></span>
+          <span className={clsx(css.value, css.pnlValue, colorClass(pnlSign) === 'up' && css.up, colorClass(pnlSign) === 'down' && css.down)}><PnlValue pct={pnl} yk={yk} showAmount={showAmount} offline={unavailable} /></span>
         </button>
         <button
           type="button"
@@ -436,11 +469,11 @@ export function StockPnlCard({ onSaveCookie, onSaveFundKey }: StockPnlInjected):
             <label className={css.settingsLabel} htmlFor="stock-pnl-cookie">STOCK_PNL_COOKIE</label>
             {verify !== null && (
               <span
-                className={clsx(css.badge, !verify.configured ? css.badgeMuted : verify.valid ? css.badgeOk : css.badgeBad)}
+                className={clsx(css.badge, !verify.configured || verify.reason === 'blocked' ? css.badgeMuted : verify.valid ? css.badgeOk : css.badgeBad)}
                 role="status"
                 title={verify.error ?? (verify.configured ? 'Cookie 已通过账本校验' : '尚未配置 Cookie')}
               >
-                {!verify.configured ? '未配置' : verify.valid ? '✓ 有效' : '✗ 无效'}
+                {!verify.configured ? '未配置' : verify.reason === 'blocked' ? '稍后重试' : verify.valid ? '✓ 有效' : '✗ 无效'}
               </span>
             )}
           </div>
@@ -540,6 +573,17 @@ export function StockPnlCard({ onSaveCookie, onSaveFundKey }: StockPnlInjected):
             <button type="button" className={css.cancelBtn} onClick={() => { setEditing(false) }} disabled={saving}>
               取消
             </button>
+            <button
+              type="button"
+              className={css.ghostBtn}
+              onClick={() => { void updateData.current?.() }}
+              disabled={updating || saving || acqBusy || acquiring || pendingSave}
+              aria-label="立即更新数据"
+              aria-busy={updating}
+              title="使用已保存的登录状态和组合，立即更新盈亏与指数"
+            >
+              {updating ? '更新中…' : '立即更新数据'}
+            </button>
           </div>
           {saving && <div className={css.settingsStatus}>保存中...</div>}
           {saveError !== null && <div className={css.error}>{saveError}</div>}
@@ -550,10 +594,10 @@ export function StockPnlCard({ onSaveCookie, onSaveFundKey }: StockPnlInjected):
         </div>
       )}
 
-      {offline ? <div className={css.error}>连接中...</div> : <MiniChart data={snapshot?.chart_data ?? []} last={pnl} />}
+      {offline ? <div className={css.error}>连接中...</div> : unavailable ? null : <MiniChart data={snapshot?.chart_data ?? []} last={pnl} />}
       <div className={css.row}>
         <span className={css.label}>上证指数</span>
-        <span className={clsx(css.value, css.small, colorClass(sh) === 'up' && css.up, colorClass(sh) === 'down' && css.down)}>{offline ? '--' : signed(sh)}</span>
+        <span className={clsx(css.value, css.small, colorClass(sh) === 'up' && css.up, colorClass(sh) === 'down' && css.down)}>{indexUnavailable ? '--' : signed(sh)}</span>
       </div>
       {snapshot !== null && snapshot.token_expired && <div className={css.alert}>Token 已过期，请更新 Cookie</div>}
       {snapshot !== null && snapshot.error !== '' && (

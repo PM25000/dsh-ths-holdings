@@ -8,6 +8,8 @@
   <a href="https://www.npmjs.com/package/dsh-ths-holdings"><img src="https://img.shields.io/npm/dt/dsh-ths-holdings?style=flat-square" alt="npm version"></a>
 </p>
 
+Unreleased: this branch adds automatically registered read-only DSH tools and the bundled ths-portfolio-report Skill for manual and scheduled portfolio reports. See the [automation guide](docs/automation.md). Published 0.2.2 does not include this feature.
+
 English | [中文](README.zh.md)
 
 A floating **position P&L card** for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH) Desktop and Web. It automatically syncs your **real portfolio data** from the [Tonghuashun investment-ledger](https://tzzb.10jqka.com.cn) (同花顺投资账本) — no manual stock picking. Displays **今日盈亏** (today's P&L), **上证指数** (Shanghai Composite Index), and an intraday mini chart, all in the A-share red-up/green-down convention.
@@ -60,6 +62,8 @@ Desktop and Web manage their plugins separately; use the installation method for
 If closing the window times out, profile cleanup continues when the browser actually exits. Cleanup failures remain visible in settings with a retry button. Cookie saves wait up to 30 seconds; a timeout or cancellation closes the login window, but an already submitted storage operation may still complete. The card shows that the result is unconfirmed and blocks additional saves until that operation settles, preventing an older request from overwriting a newer Cookie.
 
 Manual saves are unavailable while automatic login is starting or running; cancel automatic login and wait for it to end before saving manually. Pending writes continue to block new writes to the same credential reference after the plugin reloads within the same DSH process, until the old operation settles.
+
+Click **立即更新数据** in the expanded ⚙ settings to fetch P&L and the index immediately using the saved sign-in and selected portfolio. The button shows a loading state during the request; failures retain previous successful values and their original update time.
 
 **Manual (backup):**
 
@@ -118,6 +122,8 @@ The node half reads the login Cookie per request through the credential-referenc
 
 Auto-acquire runs a host state machine (`acquire.ts`): open a system Edge / Chrome window, wait for a `userid` cookie, save ledger-domain cookies and close the window. `login-browser.ts` uses a dedicated pipe with browser-level commands, without opening a debugging port or enabling page Runtime / Debugger sessions. It does not read page contents; the user sees any site refusal directly. Cancellation, timeout, early closure and save failures are handled explicitly. Manual saves use the plugin's same-origin POST routes (`/api/stock-pnl/cookie` and `/api/stock-pnl/fund-key`), respect configured credential references, and no longer depend on DSH's legacy `connection.api.credentials` interface.
 
+The network layer prepares temporary request state before each request and retry without rewriting stored login credentials. Unrecognized formats retain the original request. This compatibility handling adds no background requests and does not replace signing in again when the session expires.
+
 ## Config
 
 | Key | Default | Meaning |
@@ -125,10 +131,11 @@ Auto-acquire runs a host state machine (`acquire.ts`): open a system Edge / Chro
 | `cookieEnv` | `STOCK_PNL_COOKIE` | Credential reference holding the ledger Cookie. |
 | `fundKeyEnv` | `STOCK_PNL_FUND_KEY` | Credential reference holding the ledger fund key (saved from the card's ⚙ form). |
 | `user_id` | the Cookie's `userid` | The ledger user id, included in every form payload; an empty value falls back to the Cookie's own `userid`. |
-| `fund_key` | auto-discovered | The ledger fund key selecting the managed portfolio; overridden by the `fundKeyEnv` credential when set, auto-discovered from the account list when empty. |
+| `fund_key` | auto-discovered | The ledger fund key selecting the managed portfolio; overridden by the `fundKeyEnv` credential when set, auto-discovered only when a single account is available; multiple accounts require selection. |
 | `pnlUrl` | Tonghuashun `time_share` endpoint | P&L endpoint override (tests point at a scripted server). |
 | `indexUrl` | Tonghuashun `getQuotes` endpoint | Index endpoint override (tests point at a scripted server). |
-| `pollMs` | `20000` | Poll interval (ms) the card uses; reported to the browser in each response's `poll_ms`. |
+| `pollMs` | `20000` | Card poll interval in milliseconds. |
+| `requestTimeoutMs` | `15000` | Model query or card acquisition deadline, 100–120000 ms. |
 
 ## Directory structure
 
@@ -166,15 +173,15 @@ dsh-ths-holdings/
 
 ## Model Experience
 
-None — the card is a browser-side overlay over a host data route and registers nothing model-facing.
+When tools and skills services are present, the plugin automatically contributes ths_list_portfolios, ths_get_positions, ths_get_pnl, and the bundled ths-portfolio-report Skill. The card itself contributes no prompt.
 
 #### KV Cache effect
 
-None — the plugin contributes no prompt, schema, or result.
+Three stable tool schemas and one short Skill catalog entry are added. Skill instructions load on demand; full holdings enter context only when queried.
 
 ## Known Limitations
 
-- **The ledger API is an undocumented, login-gated endpoint** — its response format can change and the Cookie expires; the plugin surfaces both as errors rather than retrying or caching.
+- **The ledger API is an undocumented, login-gated endpoint** — its response format can change and the Cookie expires. Intermittent 403 responses get bounded transport recovery. On persistent failure the card retains its previous successful values and original update time; explicit login expiry still requires signing in again.
 - **The portfolio list endpoint (`account_list`) requires the Cookie to be saved first** — the portfolio selector appears after you paste a valid Cookie.
 - **Auto-acquire uses a system browser** — no Playwright installation is needed. Edge or Chrome must be installed and the host must have a visible desktop session; otherwise use manual paste.
 - **No server-side polling** — the route fetches on each request and the card polls at the configured `pollMs` interval; there is no shared cache or push channel.
