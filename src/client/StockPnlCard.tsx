@@ -39,6 +39,8 @@ interface VerifyView {
 
 /** Business face injected at registration: the two credential-writing verbs. */
 export interface StockPnlInjected {
+  /** Accepted Host preference, supplied by the shared settings form. */
+  pollMs?: number
   /** Persist the Cookie value through the host credential seam. */
   onSaveCookie: (value: string) => Promise<void>
   /** Persist the fund key through the host credential seam. */
@@ -114,7 +116,7 @@ function MiniChart({ data, last }: { data: readonly { t: number; v: number }[]; 
 }
 
 /** The floating card, exported for the `shell.overlay` registration. */
-export function StockPnlCard({ onSaveCookie, onSaveFundKey }: StockPnlInjected): ReactNode {
+export function StockPnlCard({ onSaveCookie, onSaveFundKey, pollMs }: StockPnlInjected): ReactNode {
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null)
   const [offline, setOffline] = useState(false)
   const [collapsed, setCollapsed] = useState(false)
@@ -124,6 +126,8 @@ export function StockPnlCard({ onSaveCookie, onSaveFundKey }: StockPnlInjected):
   const [saveError, setSaveError] = useState<string | null>(null)
   const [saved, setSaved] = useState(false)
   const [refreshKey, setRefreshKey] = useState(0)
+  const refreshGeneration = useRef(refreshKey)
+  const previousSnapshot = useRef<Snapshot | null>(null)
   const [updating, setUpdating] = useState(false)
   const updateData = useRef<(() => Promise<void>) | null>(null)
   // Portfolio list and the currently selected fund_key.
@@ -188,25 +192,31 @@ export function StockPnlCard({ onSaveCookie, onSaveFundKey }: StockPnlInjected):
   useEffect(() => {
     let disposed = false
     let timer: ReturnType<typeof setTimeout> | undefined
-    let lastGood: Snapshot | null = null
+    let lastGood = previousSnapshot.current
     let running = false
     // A new refresh generation follows a credential/portfolio change: never reuse the old account.
-    setSnapshot(null)
-    setOffline(false)
+    if (refreshGeneration.current !== refreshKey) {
+      refreshGeneration.current = refreshKey
+      lastGood = null
+      previousSnapshot.current = null
+      setSnapshot(null)
+      setOffline(false)
+    }
     const tick = async (): Promise<void> => {
       if (disposed || running) return
       running = true
       if (timer !== undefined) clearTimeout(timer)
       setUpdating(true)
-      let interval = DEFAULT_POLL_MS
+      let interval = pollMs ?? DEFAULT_POLL_MS
       try {
         const response = await fetch('/api/stock-pnl', { cache: 'no-store' })
         if (!response.ok) throw new Error(`HTTP ${response.status}`)
         const next = (await response.json()) as Snapshot
         if (disposed) return
-        interval = Number.isFinite(next.poll_ms) && next.poll_ms > 0 ? next.poll_ms : DEFAULT_POLL_MS
+        interval = pollMs ?? (Number.isFinite(next.poll_ms) && next.poll_ms > 0 ? next.poll_ms : DEFAULT_POLL_MS)
         if (next.error === '' && !next.index_unavailable) {
           lastGood = next
+          previousSnapshot.current = next
           setSnapshot(next)
         } else {
           setSnapshot(lastGood ? { ...lastGood, stale: true, error: next.error || '指数暂未更新，显示上次数据', token_expired: next.token_expired, poll_ms: next.poll_ms } : next)
@@ -234,7 +244,7 @@ export function StockPnlCard({ onSaveCookie, onSaveFundKey }: StockPnlInjected):
       if (updateData.current === tick) updateData.current = null
       if (timer !== undefined) clearTimeout(timer)
     }
-  }, [refreshKey])
+  }, [refreshKey, pollMs])
 
   // Fetch the portfolio list when the settings panel opens or refresh is clicked.
   useEffect(() => {

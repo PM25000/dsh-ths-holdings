@@ -136,6 +136,25 @@ globalThis.fetch = (input, init) => {
     assert.equal(inventory.result?.ok, true);
     const entry = inventory.result.value.entries.find(e => e.moduleName === 'dsh-ths-holdings');
     assert.equal(entry?.fiberPhase, 'active', JSON.stringify(entry) + '\n' + stderr);
+    const settingsRpc = async (method, args = {}) => {
+      const result = await json('/api/settings/' + method, {
+        type: 'client-request', rpcId: 'ths-settings-' + method, method: 'settings/' + method, payload: { args },
+      });
+      assert.equal(result.result?.ok, true, JSON.stringify(result));
+      return result.result.value;
+    };
+    const settingsBefore = (await settingsRpc('describe')).namespaces.find(item => item.ns === 'ths-holdings');
+    assert.deepEqual(settingsBefore.value, { pollMs: 20000, showCard: true });
+    assert.equal(settingsBefore.autoGenerate, false);
+    const settingsAfter = await settingsRpc('update', {
+      ns: 'ths-holdings', patch: { pollMs: 5000, showCard: false }, expectedRevision: settingsBefore.revision,
+    });
+    assert.deepEqual(settingsAfter.value, { pollMs: 5000, showCard: false });
+    assert.equal((await json('/api/stock-pnl')).poll_ms, 5000, 'Live Config updates reach card responses');
+    const savedPatch = fs.readFileSync(path.join(profile, 'cordis.patch.yml'), 'utf8');
+    assert(savedPatch.includes('showCard: false') && savedPatch.includes('pollMs: 5000'), 'Settings persist to the isolated profile');
+    fs.writeFileSync(path.join(root, 'preferences-verification.json'), JSON.stringify({ defaults: settingsBefore.value, saved: settingsAfter.value, persisted: true, livePollingInterval: true }, null, 2));
+    await settingsRpc('update', { ns: 'ths-holdings', patch: { showCard: true }, expectedRevision: settingsAfter.revision });
     assert.equal((await json('/api/stock-pnl/verify')).configured, false);
     assert.equal((await json('/api/stock-pnl/cookie', { value: 'userid=compat-test; sid=fixture' })).saved, true);
     assert.equal((await json('/api/stock-pnl/verify')).valid, true);
