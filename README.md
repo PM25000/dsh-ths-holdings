@@ -59,6 +59,8 @@ Desktop and Web manage their plugins separately; use the installation method for
 
 Click **立即更新数据** in the expanded ⚙ settings to fetch P&L and the index immediately using the saved sign-in and selected portfolio. The button shows a loading state during the request; failures retain previous successful values and their original update time.
 
+Open **Settings → Tonghuashun holdings** in DSH to change the refresh interval (default: 20000 ms, or 20 seconds) and card visibility. Click **Save** to apply changes immediately and retain them after restart. Hiding the card stops its automatic refresh; chat queries and scheduled reports remain available.
+
 **Manual (backup):**
 
 1. Open [https://tzzb.10jqka.com.cn](https://tzzb.10jqka.com.cn) and log in.
