@@ -411,3 +411,12 @@
   font-family: var(--dsw-mono, 'Cascadia Code', Consolas, monospace);
   font-size: 10px;
 }
+
+/* The settings page uses the same login controls without floating positioning. */
+.connection {
+  max-width: 560px;
+  padding: 16px;
+  border-radius: 12px;
+  color: #e0e0e0;
+  background: #303238;
+}

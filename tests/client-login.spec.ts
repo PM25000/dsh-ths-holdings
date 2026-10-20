@@ -25,6 +25,7 @@ function deferred<T>() {
 async function card(t: TestContext, options: {
   showAmount?: boolean; pct?: number; yk?: number; offline?: boolean; error?: string
   savedFundKey?: string | null; portfolios?: readonly string[]
+  settingsOnly?: boolean; settingsRevision?: number
 } = {}) {
   const stored = new Map<string, string>()
   if (options.savedFundKey !== null) stored.set('stock-pnl-fund-key', options.savedFundKey ?? 'old-fund')
@@ -33,6 +34,7 @@ async function card(t: TestContext, options: {
   const timeouts = new Map<number, () => void>()
   const statuses: Promise<AcquireStatusView>[] = []
   const snapshots: Promise<unknown>[] = []
+  const selections: Promise<{ fund_key: string }>[] = []
   const verifications: Promise<{ configured: boolean; valid: boolean; error?: string; reason?: string }>[] = []
   const calls: string[] = []
   const fundWrites: string[] = []
@@ -58,6 +60,7 @@ async function card(t: TestContext, options: {
       case '/api/stock-pnl/acquire/status': value = statuses.shift() ?? host.status; break
       case '/api/stock-pnl/acquire/cancel': host.status = { state: 'idle' }; value = host.status; break
       case '/api/stock-pnl/verify': value = verifications.shift() ?? { configured: true, valid: host.valid ?? host.status.state === 'saved' }; break
+      case '/api/stock-pnl/selection': value = selections.shift() ?? {fund_key:host.fund}; break
       case '/api/stock-pnl/portfolios': value = (options.portfolios ?? [host.fund]).map(fund_key => ({ fund_key, manualname: fund_key, brokername: 'test' })); break
       case '/api/stock-pnl':
         if (host.snapshotOffline) throw new Error('offline')
@@ -70,7 +73,7 @@ async function card(t: TestContext, options: {
   }
   const module = { exports: {} as { StockPnlCard: React.ComponentType } }
   const evaluate = runInNewContext(`(function(require, module, exports) { ${compiled}\n})`, {
-    fetch,
+    fetch, AbortController,
     localStorage: {
       getItem: (key: string) => stored.get(key) ?? null,
       setItem: (key: string, value: string) => stored.set(key, value),
@@ -82,16 +85,20 @@ async function card(t: TestContext, options: {
   evaluate((id: string) => id.endsWith('.css')
     ? { __esModule: true, default: new Proxy({}, { get: (_target, key) => key }) }
     : require(id), module, module.exports)
+  const props = {
+    settingsOnly: options.settingsOnly, settingsRevision: options.settingsRevision,
+    onSaveCookie: () => host.save(),
+    onSaveFundKey: async (value: string) => { fundWrites.push(value) },
+  }
   let renderer: ReturnType<typeof TestRenderer.create>
   await act(async () => {
-    renderer = TestRenderer.create(React.createElement(module.exports.StockPnlCard, {
-      onSaveCookie: () => host.save(),
-      onSaveFundKey: async (value: string) => { fundWrites.push(value) },
-    }))
+    renderer = TestRenderer.create(React.createElement(module.exports.StockPnlCard, props))
   })
   t.after(async () => { await act(async () => renderer.unmount()) })
   return {
-    host, stored, calls, fundWrites, statuses, verifications, snapshots,
+    host, stored, calls, fundWrites, statuses, verifications, snapshots, selections,
+    revision: (value: number) => act(async () => { renderer.update(React.createElement(module.exports.StockPnlCard, {...props,settingsRevision:value})) }),
+    selection: () => renderer.root.findByType('select').props.value,
     updateButton: () => renderer.root.findByProps({ 'aria-label': '立即更新数据' }),
     footer: () => renderer.root.findByProps({ className: 'footer' }).children.join(''),
     poll: () => act(async () => { const pending = [...timeouts.values()]; timeouts.clear(); for (const callback of pending) callback() }),
@@ -110,7 +117,7 @@ async function card(t: TestContext, options: {
       button.props.onClick()
     }),
     tick: () => act(async () => { for (const callback of [...intervals.values()]) callback() }),
-    draft: (value: string) => act(async () => { renderer.root.findByProps({ id: 'stock-pnl-cookie' }).props.onChange({ target: { value } }) }),
+    draft: (value: string) => act(async () => { renderer.root.findByType('textarea').props.onChange({ target: { value } }) }),
     select: (value: string) => act(async () => { await renderer.root.findByType('select').props.onChange({ target: { value } }) }),
   }
 }
@@ -396,5 +403,30 @@ describe('immediate data update in settings', () => {
     assert.deepEqual(h.pnlParts(), before)
     assert.equal(h.footer(), previousTime)
     assert.equal(h.updateButton().props.disabled, false)
+  })
+})
+
+
+describe('shared login settings', () => {
+  it('keeps the settings page usable without quote polling and ignores obsolete shared selections', async t => {
+    const ui = await card(t, { settingsOnly: true, settingsRevision: 0 })
+    assert(ui.text().includes('自动获取 Cookie'))
+    assert(!ui.text().includes('收起今日盈亏'))
+    assert.equal(ui.calls.filter(path=>path==='/api/stock-pnl').length,0)
+    await ui.draft('unsaved-input')
+    const late = deferred<{fund_key:string}>()
+    ui.selections.push(late.promise)
+    await ui.revision(1)
+    ui.host.fund = 'new-fund'
+    await ui.revision(2)
+    assert.equal(ui.selection(),'new-fund')
+    assert(ui.text().includes('unsaved-input'),'Remote selection does not overwrite the manual Cookie draft')
+    late.resolve({fund_key:'obsolete-fund'})
+    await act(async()=>{})
+    assert.equal(ui.selection(),'new-fund','A late response cannot overwrite the new selection')
+    await ui.click('保存')
+    await ui.poll()
+    assert.equal(ui.calls.filter(path=>path==='/api/stock-pnl').length,0,'Login saves never start card polling in settings-only mode')
+    assert(ui.text().includes('选择组合'))
   })
 })

@@ -7,7 +7,7 @@
  * STOCK_PNL_COOKIE and STOCK_PNL_FUND_KEY through the host credential seam.
  * Live data is component-local.
  */
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import clsx from 'clsx'
 import css from './stock-pnl.module.css'
@@ -41,6 +41,10 @@ interface VerifyView {
 export interface StockPnlInjected {
   /** Accepted Host preference, supplied by the shared settings form. */
   pollMs?: number
+  /** Settings page reuses the card login panel without starting quote polling. */
+  settingsOnly?: boolean
+  /** Shared Host changes invalidate local selection and data. */
+  settingsRevision?: number
   /** Persist the Cookie value through the host credential seam. */
   onSaveCookie: (value: string) => Promise<void>
   /** Persist the fund key through the host credential seam. */
@@ -116,11 +120,12 @@ function MiniChart({ data, last }: { data: readonly { t: number; v: number }[]; 
 }
 
 /** The floating card, exported for the `shell.overlay` registration. */
-export function StockPnlCard({ onSaveCookie, onSaveFundKey, pollMs }: StockPnlInjected): ReactNode {
+export function StockPnlCard({ onSaveCookie, onSaveFundKey, pollMs, settingsOnly = false, settingsRevision }: StockPnlInjected): ReactNode {
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null)
   const [offline, setOffline] = useState(false)
   const [collapsed, setCollapsed] = useState(false)
-  const [editing, setEditing] = useState(false)
+  const [editing, setEditing] = useState(settingsOnly)
+  const cookieId = useId()
   const [draft, setDraft] = useState('')
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
@@ -128,6 +133,7 @@ export function StockPnlCard({ onSaveCookie, onSaveFundKey, pollMs }: StockPnlIn
   const [refreshKey, setRefreshKey] = useState(0)
   const refreshGeneration = useRef(refreshKey)
   const previousSnapshot = useRef<Snapshot | null>(null)
+  const acceptedSettingsRevision = useRef(settingsRevision)
   const [updating, setUpdating] = useState(false)
   const updateData = useRef<(() => Promise<void>) | null>(null)
   // Portfolio list and the currently selected fund_key.
@@ -190,6 +196,7 @@ export function StockPnlCard({ onSaveCookie, onSaveFundKey, pollMs }: StockPnlIn
   }, [])
 
   useEffect(() => {
+    if (settingsOnly) return
     let disposed = false
     let timer: ReturnType<typeof setTimeout> | undefined
     let lastGood = previousSnapshot.current
@@ -244,7 +251,27 @@ export function StockPnlCard({ onSaveCookie, onSaveFundKey, pollMs }: StockPnlIn
       if (updateData.current === tick) updateData.current = null
       if (timer !== undefined) clearTimeout(timer)
     }
-  }, [refreshKey, pollMs])
+  }, [refreshKey, pollMs, settingsOnly])
+
+  useEffect(() => {
+    if (settingsRevision === undefined) return
+    let disposed = false
+    const controller = new AbortController()
+    void fetch('/api/stock-pnl/selection', { cache: 'no-store', signal: controller.signal }).then(async response => {
+      if (!response.ok) return
+      const selected = await response.json() as { fund_key: string }
+      if (disposed) return
+      setPortfolioFundKey(selected.fund_key)
+      if (selected.fund_key) localStorage.setItem('stock-pnl-fund-key', selected.fund_key)
+      else localStorage.removeItem('stock-pnl-fund-key')
+      setPortfolioRefreshKey(key => key + 1)
+    }).catch(() => {})
+    if (acceptedSettingsRevision.current !== settingsRevision) {
+      acceptedSettingsRevision.current = settingsRevision
+      setRefreshKey(key => key + 1)
+    }
+    return () => { disposed = true; controller.abort() }
+  }, [settingsRevision])
 
   // Fetch the portfolio list when the settings panel opens or refresh is clicked.
   useEffect(() => {
@@ -266,8 +293,9 @@ export function StockPnlCard({ onSaveCookie, onSaveFundKey, pollMs }: StockPnlIn
         const list = (await resp.json()) as readonly PortfolioInfo[]
         if (disposed) return
         setPortfolios(list)
+        if (settingsRevision !== undefined && list.length === 1) setPortfolioFundKey(current => current || list[0]!.fund_key)
         // Multiple portfolios require an explicit choice, including on the first panel open.
-        if (list.length === 1 && !localStorage.getItem('stock-pnl-fund-key')) {
+        if (settingsRevision === undefined && list.length === 1 && !localStorage.getItem('stock-pnl-fund-key')) {
           const first = list[0]!
           await onSaveFundKey(first.fund_key)
           setPortfolioFundKey(first.fund_key)
@@ -419,6 +447,138 @@ export function StockPnlCard({ onSaveCookie, onSaveFundKey, pollMs }: StockPnlIn
     }
   }
 
+  const settingsPanel = (
+    <div className={css.settings}>
+      <div className={css.settingsHeader}>
+        <label className={css.settingsLabel} htmlFor={cookieId}>STOCK_PNL_COOKIE</label>
+        {verify !== null && (
+          <span
+            className={clsx(css.badge, !verify.configured || verify.reason === 'blocked' ? css.badgeMuted : verify.valid ? css.badgeOk : css.badgeBad)}
+            role="status"
+            title={verify.error ?? (verify.configured ? 'Cookie 已通过账本校验' : '尚未配置 Cookie')}
+          >
+            {!verify.configured ? '未配置' : verify.reason === 'blocked' ? '稍后重试' : verify.valid ? '✓ 有效' : '✗ 无效'}
+          </span>
+        )}
+      </div>
+
+      {(acq === null || acq.state === 'idle') ? (
+        <div className={css.acqRow}>
+          <button type="button" className={css.autoBtn} onClick={() => { void startAcquire() }} disabled={acqBusy || saving || pendingSave}>
+            {acqBusy ? '启动浏览器…' : '🖥 自动获取 Cookie（推荐）'}
+          </button>
+          <span className={css.acqTip}>弹出浏览器窗口，扫码登录后自动保存</span>
+        </div>
+      ) : acq.state === 'acquiring' ? (
+        <div className={css.acqPanel}>
+          <div className={css.acqStatus}>正在登录… 请在弹出的浏览器窗口完成登录（扫码 / 账号）</div>
+          {acq.error !== undefined && acq.error.length > 0 && <div className={css.error}>{acq.error}</div>}
+          {acq.hint !== undefined && acq.hint.length > 0 && <div className={css.acqTip}>{acq.hint}</div>}
+          <div className={css.acqActions}>
+            <button type="button" className={css.ghostBtn} onClick={() => { void continueAcquire() }}>我已登录，继续 →</button>
+            <button type="button" className={css.cancelBtn} onClick={() => { void cancelAcquire() }}>取消</button>
+          </div>
+        </div>
+      ) : acq.state === 'saved' ? (
+        <div className={css.acqStatus}>✓ 已自动获取并保存 Cookie</div>
+      ) : (
+        <div className={css.acqPanel}>
+          <div className={css.error}>{acq.error ?? '自动获取失败'}</div>
+          {acq.hint !== undefined && acq.hint.length > 0 && <div className={css.acqTip}>{acq.hint}</div>}
+          <button type="button" className={css.autoBtn} onClick={() => { void startAcquire() }} disabled={acqBusy || saving || pendingSave}>重试</button>
+        </div>
+      )}
+
+      {acq?.warning && <div className={css.error} role="status">{acq.warning}</div>}
+      {acq?.cleanup_pending && (
+        <button type="button" className={css.ghostBtn} onClick={() => { void cancelAcquire() }}>重试清理</button>
+      )}
+
+      <div className={css.manualHint}>
+        或手动：登录 <a className={css.link} href="https://tzzb.10jqka.com.cn" target="_blank" rel="noreferrer">投资账本</a> 后，点击浏览器右上角菜单 → 更多工具 → 开发者工具（F12 无反应时从菜单打开）。
+        保持工具打开，在「网络 / Network」中刷新页面，选择本站请求，在「请求标头 / Request Headers」中复制 Cookie 的值并粘贴到下方。
+      </div>
+      <label className={css.settingsLabel} htmlFor={cookieId}>STOCK_PNL_COOKIE</label>
+      <textarea
+        id={cookieId}
+        className={css.settingsInput}
+        value={draft}
+        onChange={event => { setDraft(event.target.value) }}
+        placeholder="粘贴投资账本登录 Cookie"
+        rows={3}
+      />
+      <div className={css.portfolioHeader}>
+        <span className={css.settingsLabel}>选择组合</span>
+        <button
+          type="button"
+          className={css.refreshBtn}
+          onClick={() => {
+            setPortfolios([])
+            setPortfolioRefreshKey(k => k + 1)
+          }}
+          disabled={portfolios.length === 0}
+          aria-label="刷新组合列表"
+        >
+          ↻
+        </button>
+      </div>
+      <select
+        className={css.portfolioSelect}
+        value={portfolioFundKey}
+        onChange={async event => {
+          const key = event.target.value
+          if (!key) return
+          try {
+            await onSaveFundKey(key)
+            setPortfolioFundKey(key)
+            localStorage.setItem('stock-pnl-fund-key', key)
+            setSaveError(null)
+            setRefreshKey(k => k + 1)
+          } catch (error) {
+            setSaveError(error instanceof Error ? error.message : '保存组合失败')
+          }
+        }}
+      >
+        <option value="">{portfoliosLoading ? '加载中...' : portfolios.length === 0 ? '暂无组合' : '-- 选择组合 --'}</option>
+        {portfolios.map(p => (
+          <option key={p.fund_key} value={p.fund_key}>
+            {p.manualname}（{p.brokername}）
+          </option>
+        ))}
+      </select>
+      {!settingsOnly && <label className={css.toggleLabel}>
+        <input type="checkbox" checked={showAmount} onChange={event => { const v = event.target.checked; setShowAmount(v); localStorage.setItem('stock-pnl-show-amount', String(v)) }} />
+        显示金额（¥）
+      </label>}
+      <div className={css.settingsActions}>
+        <button type="button" className={css.saveBtn} onClick={() => { void save() }} disabled={saving || acqBusy || pendingSave || acquiring || draft.trim().length === 0}>
+          保存
+        </button>
+        <button type="button" className={css.cancelBtn} onClick={() => { setDraft(''); setEditing(settingsOnly) }} disabled={saving}>
+          取消
+        </button>
+        {!settingsOnly && <button
+          type="button"
+          className={css.ghostBtn}
+          onClick={() => { void updateData.current?.() }}
+          disabled={updating || saving || acqBusy || acquiring || pendingSave}
+          aria-label="立即更新数据"
+          aria-busy={updating}
+          title="使用已保存的登录状态和组合，立即更新盈亏与指数"
+        >
+          {updating ? '更新中…' : '立即更新数据'}
+        </button>}
+      </div>
+      {saving && <div className={css.settingsStatus}>保存中...</div>}
+      {saveError !== null && <div className={css.error}>{saveError}</div>}
+      {saved && <div className={css.settingsStatus}>已保存</div>}
+      {verify !== null && !verify.valid && verify.error !== undefined && (
+        <div className={css.error}>{verify.error}</div>
+      )}
+    </div>
+  )
+  if (settingsOnly) return <section className={css.connection} aria-label="同花顺登录与账本">{settingsPanel}</section>
+
   if (collapsed) {
     return (
       <button
@@ -473,136 +633,7 @@ export function StockPnlCard({ onSaveCookie, onSaveFundKey, pollMs }: StockPnlIn
         </button>
       </div>
 
-      {editing && (
-        <div className={css.settings}>
-          <div className={css.settingsHeader}>
-            <label className={css.settingsLabel} htmlFor="stock-pnl-cookie">STOCK_PNL_COOKIE</label>
-            {verify !== null && (
-              <span
-                className={clsx(css.badge, !verify.configured || verify.reason === 'blocked' ? css.badgeMuted : verify.valid ? css.badgeOk : css.badgeBad)}
-                role="status"
-                title={verify.error ?? (verify.configured ? 'Cookie 已通过账本校验' : '尚未配置 Cookie')}
-              >
-                {!verify.configured ? '未配置' : verify.reason === 'blocked' ? '稍后重试' : verify.valid ? '✓ 有效' : '✗ 无效'}
-              </span>
-            )}
-          </div>
-
-          {(acq === null || acq.state === 'idle') ? (
-            <div className={css.acqRow}>
-              <button type="button" className={css.autoBtn} onClick={() => { void startAcquire() }} disabled={acqBusy || saving || pendingSave}>
-                {acqBusy ? '启动浏览器…' : '🖥 自动获取 Cookie（推荐）'}
-              </button>
-              <span className={css.acqTip}>弹出浏览器窗口，扫码登录后自动保存</span>
-            </div>
-          ) : acq.state === 'acquiring' ? (
-            <div className={css.acqPanel}>
-              <div className={css.acqStatus}>正在登录… 请在弹出的浏览器窗口完成登录（扫码 / 账号）</div>
-              {acq.error !== undefined && acq.error.length > 0 && <div className={css.error}>{acq.error}</div>}
-              {acq.hint !== undefined && acq.hint.length > 0 && <div className={css.acqTip}>{acq.hint}</div>}
-              <div className={css.acqActions}>
-                <button type="button" className={css.ghostBtn} onClick={() => { void continueAcquire() }}>我已登录，继续 →</button>
-                <button type="button" className={css.cancelBtn} onClick={() => { void cancelAcquire() }}>取消</button>
-              </div>
-            </div>
-          ) : acq.state === 'saved' ? (
-            <div className={css.acqStatus}>✓ 已自动获取并保存 Cookie</div>
-          ) : (
-            <div className={css.acqPanel}>
-              <div className={css.error}>{acq.error ?? '自动获取失败'}</div>
-              {acq.hint !== undefined && acq.hint.length > 0 && <div className={css.acqTip}>{acq.hint}</div>}
-              <button type="button" className={css.autoBtn} onClick={() => { void startAcquire() }} disabled={acqBusy || saving || pendingSave}>重试</button>
-            </div>
-          )}
-
-          {acq?.warning && <div className={css.error} role="status">{acq.warning}</div>}
-          {acq?.cleanup_pending && (
-            <button type="button" className={css.ghostBtn} onClick={() => { void cancelAcquire() }}>重试清理</button>
-          )}
-
-          <div className={css.manualHint}>
-            或手动：登录 <a className={css.link} href="https://tzzb.10jqka.com.cn" target="_blank" rel="noreferrer">投资账本</a> 后，点击浏览器右上角菜单 → 更多工具 → 开发者工具（F12 无反应时从菜单打开）。
-            保持工具打开，在「网络 / Network」中刷新页面，选择本站请求，在「请求标头 / Request Headers」中复制 Cookie 的值并粘贴到下方。
-          </div>
-          <label className={css.settingsLabel} htmlFor="stock-pnl-cookie">STOCK_PNL_COOKIE</label>
-          <textarea
-            id="stock-pnl-cookie"
-            className={css.settingsInput}
-            value={draft}
-            onChange={event => { setDraft(event.target.value) }}
-            placeholder="粘贴投资账本登录 Cookie"
-            rows={3}
-          />
-          <div className={css.portfolioHeader}>
-            <span className={css.settingsLabel}>选择组合</span>
-            <button
-              type="button"
-              className={css.refreshBtn}
-              onClick={() => {
-                setPortfolios([])
-                setPortfolioRefreshKey(k => k + 1)
-              }}
-              disabled={portfolios.length === 0}
-              aria-label="刷新组合列表"
-            >
-              ↻
-            </button>
-          </div>
-          <select
-            className={css.portfolioSelect}
-            value={portfolioFundKey}
-            onChange={async event => {
-              const key = event.target.value
-              if (!key) return
-              try {
-                await onSaveFundKey(key)
-                setPortfolioFundKey(key)
-                localStorage.setItem('stock-pnl-fund-key', key)
-                setSaveError(null)
-                setRefreshKey(k => k + 1)
-              } catch (error) {
-                setSaveError(error instanceof Error ? error.message : '保存组合失败')
-              }
-            }}
-          >
-            <option value="">{portfoliosLoading ? '加载中...' : portfolios.length === 0 ? '暂无组合' : '-- 选择组合 --'}</option>
-            {portfolios.map(p => (
-              <option key={p.fund_key} value={p.fund_key}>
-                {p.manualname}（{p.brokername}）
-              </option>
-            ))}
-          </select>
-          <label className={css.toggleLabel}>
-            <input type="checkbox" checked={showAmount} onChange={event => { const v = event.target.checked; setShowAmount(v); localStorage.setItem('stock-pnl-show-amount', String(v)) }} />
-            显示金额（¥）
-          </label>
-          <div className={css.settingsActions}>
-            <button type="button" className={css.saveBtn} onClick={() => { void save() }} disabled={saving || acqBusy || pendingSave || acquiring || draft.trim().length === 0}>
-              保存
-            </button>
-            <button type="button" className={css.cancelBtn} onClick={() => { setEditing(false) }} disabled={saving}>
-              取消
-            </button>
-            <button
-              type="button"
-              className={css.ghostBtn}
-              onClick={() => { void updateData.current?.() }}
-              disabled={updating || saving || acqBusy || acquiring || pendingSave}
-              aria-label="立即更新数据"
-              aria-busy={updating}
-              title="使用已保存的登录状态和组合，立即更新盈亏与指数"
-            >
-              {updating ? '更新中…' : '立即更新数据'}
-            </button>
-          </div>
-          {saving && <div className={css.settingsStatus}>保存中...</div>}
-          {saveError !== null && <div className={css.error}>{saveError}</div>}
-          {saved && <div className={css.settingsStatus}>已保存</div>}
-          {verify !== null && !verify.valid && verify.error !== undefined && (
-            <div className={css.error}>{verify.error}</div>
-          )}
-        </div>
-      )}
+      {editing && settingsPanel}
 
       {offline ? <div className={css.error}>连接中...</div> : unavailable ? null : <MiniChart data={snapshot?.chart_data ?? []} last={pnl} />}
       <div className={css.row}>

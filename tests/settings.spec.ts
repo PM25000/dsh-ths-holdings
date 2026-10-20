@@ -4,7 +4,7 @@ import { createServer } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import type { Context } from '@deepseek-ai/cordis'
 import type { WebRoute } from '@deepseek-ai/dsh-host-webserver'
-import { apply } from '../src/index.ts'
+import { apply } from '../src/host.ts'
 import { saveSetting } from '../src/client/settings.ts'
 
 const cleanup: Array<() => Promise<void>> = []

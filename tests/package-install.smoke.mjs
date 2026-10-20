@@ -19,7 +19,8 @@ run(['run','build'])
 run(['pack','--pack-destination',root])
 const pkg=JSON.parse(await readFile(join(repo,'package.json'),'utf8'))
 const dependencies={'dsh-ths-holdings':'file:./dsh-ths-holdings-'+pkg.version+'.tgz'}
-for(const name of ['@deepseek-ai/cordis','@deepseek-ai/dsh-tools','@deepseek-ai/dsh-skill','@deepseek-ai/dsh-system-prompt','@deepseek-ai/dsh-credentials','@deepseek-ai/dsh-host-webserver'])dependencies[name]=pkg.devDependencies[name]
+for(const name of ['@deepseek-ai/cordis-plugin-loader','@deepseek-ai/cordis-plugin-include','@deepseek-ai/cordis','@deepseek-ai/dsh-tools','@deepseek-ai/dsh-skill','@deepseek-ai/dsh-system-prompt','@deepseek-ai/dsh-credentials','@deepseek-ai/dsh-host-webserver'])dependencies[name]=pkg.devDependencies[name]
+dependencies.yaml=pkg.dependencies.yaml
 await writeFile(join(root,'package.json'),JSON.stringify({name:'ths-package-consumer',private:true,type:'module',packageManager:pkg.packageManager,dependencies},null,2))
 run(['install'],root)
 await copyFile(join(repo,'tests/package-consumer.smoke.mjs'),join(root,'consumer.mjs'))

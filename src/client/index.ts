@@ -14,7 +14,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-ui-layout/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
-import { Preferences, StockPnlOverlay } from './Preferences.tsx'
+import { ComponentPreferences, ComponentOverlay, ComponentStore } from './components.tsx'
 import { SETTINGS_ENTRY_ID, type CardPreferences } from '../preferences.ts'
 import { SETTINGS_NS, zh, en } from './locales.ts'
 import { saveSetting } from './settings.ts'
@@ -38,26 +38,34 @@ export const inject = ['slots', 'configForms', 'locale']
  * @param ctx - client root context.
  */
 export function apply(ctx: Context): void {
+  const components = new ComponentStore()
+  ctx.effect(() => {
+    const events = new EventSource('/api/stock-pnl/components')
+    events.onmessage = event => {
+      try {
+        const state = JSON.parse(event.data)
+        if (typeof state.card === 'boolean' && typeof state.skill === 'boolean' && Number.isSafeInteger(state.revision)) components.update(state)
+      } catch { /* The next event or reconnect restores the authoritative state. */ }
+    }
+    // EventSource reconnects automatically; preserve the last successful card meanwhile.
+    return () => events.close()
+  })
+  const actions = {
+    onSaveCookie: (value: string) => saveSetting('cookie', value),
+    onSaveFundKey: (value: string) => saveSetting('fund-key', value),
+  }
   const preferences = ctx.configForms.get<CardPreferences>(SETTINGS_ENTRY_ID)
   ctx.effect(() => ctx.locale.register(SETTINGS_NS, { zh, en }))
   const t = ctx.locale.bind(SETTINGS_NS)
   ctx.slots.inject('settings.section', () => ctx.slots.register({
     name: 'settings.section', id: SETTINGS_ENTRY_ID, order: 200,
     label: () => t('title'), locale: SETTINGS_NS,
-    inject: () => ({ preferences }),
-  }, Preferences))
+    inject: () => ({ preferences, components, ...actions }),
+  }, ComponentPreferences))
   ctx.slots.inject('shell.overlay', () => ctx.slots.register({
     name: 'shell.overlay',
     id: 'stock-pnl',
     order: 100,
-    inject: () => ({
-      preferences,
-      onSaveCookie: async (value) => {
-        await saveSetting('cookie', value)
-      },
-      onSaveFundKey: async (value) => {
-        await saveSetting('fund-key', value)
-      },
-    }),
-  }, StockPnlOverlay))
+    inject: () => ({ preferences, components, ...actions }),
+  }, ComponentOverlay))
 }
