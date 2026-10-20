@@ -1,7 +1,7 @@
 {
   "name": "dsh-ths-holdings",
   "description": "同花顺投资账本持仓插件：提供盈亏与指数悬浮卡片、持仓报告 Skill，支持聊天查询和定时报告；两个组件可独立启停，共用登录和账本选择。 P&L and index overlay card plus a portfolio report Skill for chat queries and scheduled reports. Enable each component independently with shared sign-in and portfolio selection.",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "packageManager": "pnpm@11.7.0",
   "repository": {
     "type": "git",

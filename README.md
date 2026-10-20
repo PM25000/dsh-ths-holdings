@@ -10,7 +10,7 @@
 
 English | [中文](README.zh.md)
 
-A floating **position P&L card** for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH) Desktop and Web. It automatically syncs your **real portfolio data** from the [Tonghuashun investment-ledger](https://tzzb.10jqka.com.cn) (同花顺投资账本) — no manual stock picking. Displays **今日盈亏** (today's P&L), **上证指数** (Shanghai Composite Index), and an intraday mini chart, all in the A-share red-up/green-down convention.
+A **Tonghuashun holdings plugin** providing a floating **position P&L card** and a **portfolio report Skill** for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH) Desktop and Web. It automatically syncs your **real portfolio data** from the [Tonghuashun investment-ledger](https://tzzb.10jqka.com.cn) (同花顺投资账本) — no manual stock picking. Displays **今日盈亏** (today's P&L), **上证指数** (Shanghai Composite Index), and an intraday mini chart, all in the A-share red-up/green-down convention.
 
 Unlike watchlist tools, this plugin reads your **actual positions** and shows your **real profit & loss** — both as a percentage and as a yuan amount — updating every 20 seconds.
 
@@ -20,9 +20,9 @@ Unlike watchlist tools, this plugin reads your **actual positions** and shows yo
 
 ## Version compatibility
 
-Plugin **0.3.1** targets the DSH **0.2 series** and has been tested with Desktop **0.2.0-rc.2**, without a compatibility exemption. For DSH 0.1, keep plugin **0.2.0**; this migration does not support the older host.
+Plugin **0.3.2** targets the DSH **0.2 series** and has been tested with Desktop **0.2.0-rc.2**, without a compatibility exemption. For DSH 0.1, keep plugin **0.2.0**; this migration does not support the older host.
 
-**0.3.1** adds **Settings → Tonghuashun holdings**, with a refresh interval field and card visibility switch. Changes apply when saved and persist after restart.
+**0.3.2** lets you enable the card and portfolio report Skill independently, sharing sign-in and portfolio selection. All card settings remain available; with only the Skill enabled, configure sign-in under **Settings → Tonghuashun holdings**. Fully quit and restart DSH after upgrading.
 
 ## Installation
 
@@ -134,7 +134,7 @@ Have the assistant confirm the portfolio name and next run time. Scheduled repor
 | Multiple portfolios | Select the one you want from the dropdown — the choice is saved as `STOCK_PNL_FUND_KEY`. |
 | Cookie pasted with line breaks | The plugin strips whitespace on save, so wrapped lines are fine. |
 | “稍后重试” or “数据暂时无法获取” | Wait and retry. The card may retain previous successful values; check the displayed update time. |
-| The assistant cannot query holdings | Check that the plugin is enabled and sign-in is complete. Fully restart DSH, then try again. |
+| The assistant cannot query holdings | Check that the **Portfolio report Skill** component is enabled and sign-in is complete. Fully restart DSH, then try again. |
 | The report fails while the card still has values | The card may be showing an earlier snapshot. Reports treat the current query as failed and do not reuse old results. |
 
 ## Known Limitations
