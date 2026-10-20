@@ -10,10 +10,10 @@ description: 查询同花顺投资账本的资产、持仓、仓位与盈亏，�
 ## 账本与查询
 
 - 用户或任务指定账本时，把其选择标识传给 `ths_get_positions.portfolio_id`。
-- 未指定时直接调用 `ths_get_positions`，由宿主使用卡片已保存的选择或唯一账本；返回 `PORTFOLIO_REQUIRED` 时再调用 `ths_list_portfolios`。
+- 未指定时直接调用 `ths_get_positions`，由宿主使用插件已保存的选择或唯一账本；返回 `PORTFOLIO_REQUIRED` 时再调用 `ths_list_portfolios`。
 - 交互查询有多个未选账本时请用户选择。定时任务报告需要配置账本后结束，不自行选第一个，不启动登录窗口。
 - 需要分时走势或整体分时盈亏时调用 `ths_get_pnl`，使用同一明确账本。无需分时信息时不调用。
-- 定时任务提示中应保存明确的 `portfolio_id`，避免卡片默认选择变化后任务改查其他账本。
+- 定时任务提示中应保存明确的 `portfolio_id`，避免插件默认选择变化后任务改查其他账本。
 
 ## 结果判断
 

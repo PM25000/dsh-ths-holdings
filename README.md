@@ -49,6 +49,13 @@ Desktop and Web manage their plugins separately; use the installation method for
 
 ## Usage
 
+The plugin details page provides two independent component switches:
+
+- **Portfolio report Skill**: holdings queries in ordinary chat and scheduled reports.
+- **Tonghuashun holdings plugin (card component)**: the floating card with P&L and index data.
+
+Both share the saved sign-in and portfolio selection. Enable either or both. All existing **⚙ card settings remain available**. With only the Skill enabled, sign in and choose a portfolio under **Settings → Tonghuashun holdings → Sign-in and portfolio**.
+
 **Recommended — auto-acquire:**
 
 1. Open DSH Desktop or Web and click **⚙** on the card.
@@ -59,7 +66,7 @@ Desktop and Web manage their plugins separately; use the installation method for
 
 Click **立即更新数据** in the expanded ⚙ settings to fetch P&L and the index immediately using the saved sign-in and selected portfolio. The button shows a loading state during the request; failures retain previous successful values and their original update time.
 
-Open **Settings → Tonghuashun holdings** in DSH to change the refresh interval (default: 20000 ms, or 20 seconds) and card visibility. Click **Save** to apply changes immediately and retain them after restart. Hiding the card stops its automatic refresh; chat queries and scheduled reports remain available.
+Open **Settings → Tonghuashun holdings** in DSH to change the refresh interval (default: 20000 ms, or 20 seconds) and card visibility. Click **Save** to apply changes immediately and retain them after restart. Hiding the card stops its automatic refresh without disabling the Skill. The **Tonghuashun holdings plugin** card component switch controls whether the card feature is loaded; chat queries and scheduled reports require the **Portfolio report Skill** component to be enabled.
 
 **Manual (backup):**
 
@@ -80,7 +87,7 @@ The session cookie expires eventually — when it does, the card shows a **Token
 
 ## Query holdings in chat
 
-Installing and enabling the plugin automatically makes the bundled `ths-portfolio-report` Skill available in ordinary chat and scheduled tasks. No separate Skill installation or MCP server is needed. Sign-in and portfolio selection use the card settings; you do not need to find or enter a portfolio ID.
+Installing the plugin and enabling the **Portfolio report Skill** component automatically makes the bundled `ths-portfolio-report` Skill available in ordinary chat and scheduled tasks. No separate Skill installation or MCP server is needed. Sign-in and portfolio selection use either the card settings or **Settings → Tonghuashun holdings → Sign-in and portfolio**; you do not need to find or enter a portfolio ID.
 
 After signing in, simply say in DSH chat:
 

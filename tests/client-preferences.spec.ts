@@ -10,7 +10,7 @@ import type { ConfigFormSnapshot } from '@deepseek-ai/dsh-client-ui-settings/cli
 import type { CardPreferences } from '../src/preferences.ts'
 
 const { act } = TestRenderer
-const sources = new Map(await Promise.all(['Preferences', 'StockPnlCard'].map(async name => {
+const sources = new Map(await Promise.all(['Preferences', 'StockPnlCard', 'components'].map(async name => {
   const url = new URL(`../src/client/${name}.tsx`, import.meta.url)
   return [name, { url, compiled: ts.transpileModule(await readFile(url, 'utf8'), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true },
@@ -42,15 +42,17 @@ class Form {
 }
 
 function components() {
-  let requests = 0, failed = false, id = 0
+  let requests = 0, pnlRequests = 0, failed = false, id = 0
   const timers = new Map<number, { callback: () => void; ms: number }>()
   const sandbox = {
-    fetch: async () => {
+    fetch: async (url: string) => {
       requests++
+      if (url === '/api/stock-pnl/selection') return {ok:true,json:async()=>({fund_key:''})}
+      pnlRequests++
       if (failed) throw new Error('offline')
       return { ok: true, json: async () => ({ pnl_pct: 1, pnl_yk: 10, sh_pct: 0, chart_data: [], updated_at: '2026-10-18T01:00:00Z', error: '', token_expired: false, poll_ms: 20_000 }) }
     },
-    localStorage: { getItem: () => null },
+    localStorage: { getItem: () => null, setItem: () => {}, removeItem: () => {} }, AbortController,
     setTimeout: (callback: () => void, ms: number) => { timers.set(++id, { callback, ms }); return id },
     clearTimeout: (key: number) => { timers.delete(key) },
   }
@@ -61,10 +63,10 @@ function components() {
     const evaluate = runInNewContext(`(function(require, module, exports) { ${compiled}\n})`, sandbox)
     evaluate((id: string) => id.endsWith('.css')
       ? { __esModule: true, default: new Proxy({}, { get: (_target, key) => key }) }
-      : id === './StockPnlCard.tsx' ? load('StockPnlCard') : require(id), module, module.exports)
+      : id === './StockPnlCard.tsx' ? load('StockPnlCard') : id === './Preferences.tsx' ? load('Preferences') : require(id), module, module.exports)
     return module.exports
   }
-  return { ...load('Preferences'), timers, requests: () => requests, fail: () => { failed = true } }
+  return { ...load('Preferences'), ...load('components'), timers, pnlRequests: () => pnlRequests, requests: () => requests, fail: () => { failed = true } }
 }
 
 it('persists only valid preferences, reports refused/failed writes and honors read-only forms', async t => {
@@ -127,4 +129,30 @@ it('uses accepted polling preferences live, retains a good snapshot, and stops p
   await act(async () => form.update({ value: { pollMs: 1000, showCard: true } }))
   assert.equal(h.requests(), count + 1)
   assert.deepEqual([...h.timers.values()].map(timer => timer.ms), [1000])
+})
+
+
+it('loads the overlay only for its own component and preserves its snapshot when Skill toggles', async t => {
+  const h = components()
+  const Store = h.ComponentStore as unknown as new () => { update(state: {card:boolean;skill:boolean;revision:number}):void }
+  const store = new Store()
+  store.update({card:false,skill:true,revision:0})
+  const form = new Form()
+  let view: ReturnType<typeof TestRenderer.create>
+  await act(async()=>{view=TestRenderer.create(React.createElement(h.ComponentOverlay,{components:store,preferences:form,onSaveCookie:async()=>{},onSaveFundKey:async()=>{}}))})
+  t.after(async()=>{await act(async()=>view.unmount())})
+  assert.equal(view.toJSON(),null)
+  assert.equal(h.requests(),0,'Skill-only mode starts no card requests')
+  await act(async()=>store.update({card:true,skill:true,revision:0}))
+  assert.equal(h.pnlRequests(),1)
+  assert.equal(h.timers.size,1)
+  const footer=view.root.findByProps({className:'footer'}).children.join('')
+  await act(async()=>store.update({card:true,skill:false,revision:0}))
+  assert.equal(h.pnlRequests(),1,'Skill disablement does not restart card polling')
+  assert.equal(view.root.findByProps({className:'footer'}).children.join(''),footer)
+  await act(async()=>store.update({card:false,skill:true,revision:0}))
+  assert.equal(view.toJSON(),null)
+  assert.equal(h.timers.size,0)
+  await act(async()=>form.update({value:{pollMs:1000,showCard:true}}))
+  assert.equal(h.pnlRequests(),1,'Visibility preference cannot enable a disabled card component')
 })

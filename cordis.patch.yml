@@ -1,3 +1,6 @@
 - insert:
+    - id: ths-holdings-skill
+      name: dsh-ths-holdings/skill
+    # Retain the original id and its persisted settings on the card.
     - id: ths-holdings
       name: dsh-ths-holdings

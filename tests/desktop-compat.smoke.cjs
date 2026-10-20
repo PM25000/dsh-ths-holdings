@@ -33,6 +33,7 @@ fs.writeFileSync(path.join(profile, 'cordis.patch.yml'), `
 - id: product-analytics
   disabled: true
 - id: ths-holdings
+  name: dsh-ths-holdings
   config: { cookieEnv: THS_COMPAT_COOKIE, fundKeyEnv: THS_COMPAT_FUND }
 `);
 
@@ -134,8 +135,10 @@ globalThis.fetch = (input, init) => {
     fs.writeFileSync(path.join(root, 'inventory.json'), JSON.stringify(inventory, null, 2));
     fs.writeFileSync(path.join(root, 'host.stderr.log'), stderr);
     assert.equal(inventory.result?.ok, true);
-    const entry = inventory.result.value.entries.find(e => e.moduleName === 'dsh-ths-holdings');
-    assert.equal(entry?.fiberPhase, 'active', JSON.stringify(entry) + '\n' + stderr);
+    const entries = inventory.result.value.entries.filter(e => e.moduleName==='dsh-ths-holdings'||e.moduleName==='dsh-ths-holdings/skill');
+    assert.equal(entries.length, 2, JSON.stringify(entries) + '\n' + stderr);
+    for (const entry of entries) assert.equal(entry.fiberPhase, 'active', JSON.stringify(entry) + '\n' + stderr);
+    assert(!inventory.result.value.entries.some(e => e.entryId.endsWith('ths-holdings-shared')), 'Shared container is hidden');
     const settingsRpc = async (method, args = {}) => {
       const result = await json('/api/settings/' + method, {
         type: 'client-request', rpcId: 'ths-settings-' + method, method: 'settings/' + method, payload: { args },
@@ -154,7 +157,7 @@ globalThis.fetch = (input, init) => {
     const savedPatch = fs.readFileSync(path.join(profile, 'cordis.patch.yml'), 'utf8');
     assert(savedPatch.includes('showCard: false') && savedPatch.includes('pollMs: 5000'), 'Settings persist to the isolated profile');
     fs.writeFileSync(path.join(root, 'preferences-verification.json'), JSON.stringify({ defaults: settingsBefore.value, saved: settingsAfter.value, persisted: true, livePollingInterval: true }, null, 2));
-    await settingsRpc('update', { ns: 'ths-holdings', patch: { showCard: true }, expectedRevision: settingsAfter.revision });
+    await settingsRpc('update', { ns: 'ths-holdings', patch: { showCard: true }, expectedRevision: (await settingsRpc('describe')).namespaces.find(item => item.ns === 'ths-holdings').revision });
     assert.equal((await json('/api/stock-pnl/verify')).configured, false);
     assert.equal((await json('/api/stock-pnl/cookie', { value: 'userid=compat-test; sid=fixture' })).saved, true);
     assert.equal((await json('/api/stock-pnl/verify')).valid, true);
@@ -169,6 +172,14 @@ globalThis.fetch = (input, init) => {
     const positionResult=JSON.parse(capabilities.result.content.filter(c=>c.type==='text').map(c=>c.text).join(''));
     assert.equal(positionResult.status,'ok',JSON.stringify(positionResult));
     assert.equal(positionResult.data.positions[0].name,'示例完整名称');
+    const bundle = await json('/api/ths-compat/bundle');
+    assert.equal(bundle.meta.title.zh, '同花顺持仓插件', 'Plugin list and details use the bundle display name');
+    assert.equal(bundle.rows.length, 2, 'Only the two feature rows have switches');
+    assert.deepEqual(bundle.rows.map(row=>row.meta.title.zh).sort(), ['持仓报告 Skill', '同花顺持仓插件'].sort());
+    const onlySkill = await json('/api/ths-compat/components/card/off');
+    assert.deepEqual({ card: onlySkill.state.card, skill: onlySkill.state.skill }, { card: false, skill: true });
+    assert.equal((await json('/api/stock-pnl/selection')).fund_key, 'compat-two');
+    assert.equal((await json('/api/stock-pnl/verify')).valid, true, 'Login is available with only Skill enabled');
     const chat = await json('/api/ths-compat/chat');
     fs.writeFileSync(path.join(root, 'ordinary-chat-verification.json'), JSON.stringify(chat, null, 2));
     assert.equal(chat.userPrompt, true);
@@ -212,8 +223,27 @@ globalThis.fetch = (input, init) => {
     assert.equal((await json('/api/stock-pnl')).error, '');
     assert.equal((await request('/api/stock-pnl/cookie', { value: ';;;' })).status, 400);
     assert.equal((await json('/api/stock-pnl/verify')).valid, true);
+    const neither = await json('/api/ths-compat/components/skill/off');
+    assert.equal(neither.state.card || neither.state.skill, false);
+    assert.equal((await request('/api/stock-pnl')).status, 404, 'Last component releases the shared routes');
+    assert.deepEqual((await json('/api/ths-compat/model')).tools, []);
+    const onlyCard = await json('/api/ths-compat/components/card/on');
+    assert.equal(onlyCard.state.card, true); assert.equal(onlyCard.state.skill, false);
+    assert.deepEqual((await json('/api/ths-compat/model')).tools, []);
+    assert.equal((await json('/api/stock-pnl')).error, '');
+    assert.equal((await json('/api/stock-pnl/selection')).fund_key, 'compat-two');
+    assert.deepEqual((await settingsRpc('describe')).namespaces.find(item=>item.ns==='ths-holdings').value, { pollMs: 5000, showCard: true });
+    for(let cycle=0;cycle<2;cycle++) {
+      await json('/api/ths-compat/components/card/off');
+      assert.equal((await request('/api/stock-pnl')).status,404);
+      await json('/api/ths-compat/components/card/on');
+      assert.equal((await json('/api/stock-pnl')).error,'');
+    }
+    await json('/api/ths-compat/components/skill/on');
+    assert.equal((await json('/api/ths-compat/model')).tools.length,3);
+    fs.writeFileSync(path.join(root,'components-verification.json'),JSON.stringify({twoVisibleComponents:true,localizedNames:true,skillOnlyChat:true,skillOnlySchedule:scheduling.supported,cardOnly:true,neitherReleasesRoutes:true,repeatToggle:true,settingsPreserved:true},null,2));
     assert.ok(!stderr.includes('skipping profile bundle "dsh-ths-holdings"'));
-    console.log(JSON.stringify({ host: runtimeVersion, plugin: entry.fiberPhase, skillMounted:true, modelTools:3, positionQuery:true, ordinaryChat:true, ordinaryChatCatalog:chat.catalogVisible, slashMenuVisible:true, ordinaryChatWithoutSchedule:!chat.scheduleServicePresent, coldScheduleReport:scheduling.supported, missingScheduleServices:scheduling.missing??[], gatewayRecovery: true, sustainedGatewayFailureSanitized: true, gatewayRefusals, credentialSave: true,
+    console.log(JSON.stringify({ host: runtimeVersion, plugin: 'active', components: 2, skillMounted:true, modelTools:3, positionQuery:true, ordinaryChat:true, ordinaryChatCatalog:chat.catalogVisible, slashMenuVisible:true, ordinaryChatWithoutSchedule:!chat.scheduleServicePresent, coldScheduleReport:scheduling.supported, missingScheduleServices:scheduling.missing??[], gatewayRecovery: true, sustainedGatewayFailureSanitized: true, gatewayRefusals, credentialSave: true,
       verification: true, portfolios: portfolios.length, snapshot: true, exemptionRequired: false }));
     if (process.argv.includes('--serve')) {
       // A private local handoff for manual UI verification; never print the authenticated URL.

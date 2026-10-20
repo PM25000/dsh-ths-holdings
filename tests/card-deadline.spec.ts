@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { describe, it, type TestContext } from 'node:test'
 import type { Context } from '@deepseek-ai/cordis'
 import type { WebRoute } from '@deepseek-ai/dsh-host-webserver'
-import { apply } from '../src/index.ts'
+import { apply } from '../src/host.ts'
 import type { FetchLike } from '../src/fetch.ts'
 
 function deferred<T>() {

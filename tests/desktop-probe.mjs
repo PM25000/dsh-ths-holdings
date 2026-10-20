@@ -21,9 +21,21 @@ export function apply(ctx) {
  register('/api/ths-compat/model',async()=>{
   const skill=await ctx.skills.get('ths-portfolio-report')
   const tools=ctx.tools.schemas().filter(t=>t.name.startsWith('ths_')).map(t=>t.name)
-  const result=await ctx.tools.execute({callId:'desktop-positions',name:'ths_get_positions',arguments:{portfolio_id:'compat-two'},signal:new AbortController().signal})
+  const result=tools.length ? await ctx.tools.execute({callId:'desktop-positions',name:'ths_get_positions',arguments:{portfolio_id:'compat-two'},signal:new AbortController().signal}) : undefined
   return {skill:skill?.name,body:skill?.content,tools,result}
  })
+ for (const component of ['card', 'skill']) for (const enabled of [true, false]) {
+  register(`/api/ths-compat/components/${component}/${enabled ? 'on' : 'off'}`, async () => {
+   const manager=ctx.get('pluginManager')
+   if(!manager)throw new Error('Plugin manager missing')
+   const row=[...ctx.get('loader').entries()].find(entry=>entry.options.name===(component==='card'?'dsh-ths-holdings':`dsh-ths-holdings/${component}`))
+   const result=await manager.setPluginEnabled(row.id,enabled)
+   if(result.application!=='applied')throw new Error(JSON.stringify(result))
+   await ctx.get('loader').await()
+   return {result,state:ctx.get('thsHoldings')?.state() ?? {card:false,skill:false}}
+  })
+ }
+ register('/api/ths-compat/bundle',async()=> (await ctx.get('pluginManager').listBundles()).find(bundle=>bundle.name==='dsh-ths-holdings'))
  register('/api/ths-compat/chat',async()=>{
   if(!chatContext)throw new Error('Ordinary chat dependencies are not ready')
   return ordinaryChat(chatContext)

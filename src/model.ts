@@ -16,6 +16,8 @@ export interface Config { client: LedgerClient }
 export async function apply(ctx: Context, config: Config): Promise<void> {
   const path = fileURLToPath(new URL('../skills/ths-portfolio-report/SKILL.md', import.meta.url))
   const raw = await readFile(path, 'utf8')
+  // Do not register after asynchronous loading was cancelled (loading=1, active=2).
+  if (ctx.fiber.state !== 1 && ctx.fiber.state !== 2) return
   const match = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(raw)
   if (!match?.[1]) throw new Error('ths-portfolio-report: missing skill metadata')
   const metadata: unknown = parse(match[1])
@@ -33,7 +35,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     get: async () => ({ ...definition, content: raw.slice(match[0].length).trim() }),
   }
   ctx.skills.registerProvider(() => provider)
-  const parameters = { portfolio_id: { type: 'string', description: '账本选择标识；定时任务应显式指定以固定账本。省略时使用卡片已保存选择或唯一账本。' } } as const
+  const parameters = { portfolio_id: { type: 'string', description: '账本选择标识；定时任务应显式指定以固定账本。省略时使用插件已保存选择或唯一账本。' } } as const
   ctx.tools.register(defineTool({
     name: 'ths_list_portfolios',
     description: '只读查询同花顺投资账本列表和已保存选择。认证信息留在宿主；status=error 表示失败，不是没有账本。',

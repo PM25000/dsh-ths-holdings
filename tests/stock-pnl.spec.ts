@@ -22,6 +22,7 @@ import type { CredentialInfo, CredentialRef, ResolvedCredential } from '@deepsee
 import z from '@deepseek-ai/schemastery'
 import WebServer from '@deepseek-ai/dsh-host-webserver'
 import * as uiStockPnl from '../src/index.ts'
+import * as card from '../src/card.ts'
 import { collectStats, cookieField, verifyCookie, type FetchLike } from '../src/fetch.ts'
 
 const FIXED_NOW = () => new Date('2026-05-26T06:00:00Z')
@@ -173,7 +174,7 @@ async function loadComposition(): Promise<number> {
     "    host: '127.0.0.1'",
     '    port: 0',
     "- name: '@deepseek-ai/dsh-credentials-test'",
-    "- name: '@deepseek-ai/dsh-client-ui-stock-pnl'",
+    "- name: 'dsh-ths-holdings/card'",
     '  config:',
     `    cookieEnv: '${COOKIE_ENV}'`,
     `    pnlUrl: 'http://127.0.0.1:${String(ledgerPort)}/pnl'`,
@@ -188,7 +189,8 @@ async function loadComposition(): Promise<number> {
   const modules = new Map<string, unknown>([
     ['@deepseek-ai/dsh-host-webserver', WebServer],
     ['@deepseek-ai/dsh-credentials-test', TestCredentialProvider],
-    ['@deepseek-ai/dsh-client-ui-stock-pnl', uiStockPnl],
+    ['dsh-ths-holdings', uiStockPnl],
+    ['dsh-ths-holdings/card', card],
   ])
   context.loader.internal = {
     version: 'v2',

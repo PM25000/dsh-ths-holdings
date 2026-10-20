@@ -1,21 +1,24 @@
 /** Run a copy of this file from a clean installation containing the packed plugin. */
 import assert from 'node:assert/strict'
-import { mkdir, writeFile } from 'node:fs/promises'
-import { fileURLToPath } from 'node:url'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { Context, Service } from '@deepseek-ai/cordis'
 import Tools from '@deepseek-ai/dsh-tools'
 import Skills from '@deepseek-ai/dsh-skill'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import { CredentialProvider } from '@deepseek-ai/dsh-credentials'
-import * as plugin from 'dsh-ths-holdings'
+import Loader from '@deepseek-ai/cordis-plugin-loader'
+import Include from '@deepseek-ai/cordis-plugin-include'
+import { parse, stringify } from 'yaml'
 class Credentials extends CredentialProvider {
-  async resolve(ref) { return ref === 'STOCK_PNL_COOKIE' ? { value: 'userid=synthetic; sid=fix ture', source: 'fixture' } : undefined }
+  async resolve(ref) { return ref === 'CUSTOM_COOKIE' ? { value: 'userid=synthetic; sid=fix ture', source: 'fixture' } : ref === 'CUSTOM_FUND' ? { value: 'fixture', source: 'fixture' } : undefined }
   async describe() { return { configured: true, writable: false } }
   async set() {} async unset() {}
 }
 class Http extends Service {
   constructor(ctx) { super(ctx, 'webServer') }
-  register() { return () => {} }
+  routes=new Map()
+  register(route) { assert(!this.routes.has(route.path),'No duplicate route: '+route.path); this.routes.set(route.path,route); return () => this.routes.delete(route.path) }
 }
 const root=fileURLToPath(new URL('.',import.meta.url)), originalCwd=process.cwd(), originalFetch=globalThis.fetch
 await mkdir(root+'unrelated-cwd',{recursive:true})
@@ -35,14 +38,35 @@ globalThis.fetch=async (url,init)=>{
   else throw new Error('unexpected endpoint')
   return Response.json({error_code:'0',ex_data})
 }
+const packageRoot=new URL('../',import.meta.resolve('dsh-ths-holdings'))
+const rows=parse(await readFile(new URL('cordis.patch.yml',packageRoot),'utf8')).flatMap(patch=>patch.insert??[])
+assert.equal(rows.length,2,'The installation declares exactly two feature components')
+const cardConfig={cookieEnv:'CUSTOM_COOKIE',fundKeyEnv:'CUSTOM_FUND',pollMs:3456,showCard:false}
+const configPath=root+'cordis.yml'
+await writeFile(configPath,stringify(rows.map(row=>({...row,...row.id==='ths-holdings'?{config:cardConfig}:{} }))))
 const evidence=[]
 try {
  for(let boot=0;boot<2;boot++){
   const ctx=new Context()
   try {
    await ctx.plugin(SystemPrompt);await ctx.plugin(Tools);await ctx.plugin(Skills);await ctx.plugin(Credentials);await ctx.plugin(Http)
-   const fork=ctx.plugin(plugin,{})
-   await fork
+   ctx.baseUrl=pathToFileURL(root).href
+   await ctx.plugin(Loader)
+   ctx.loader.builtins.include=Include
+   ctx.loader.internal={version:'v2',import:specifier=>import(specifier)}
+   const includeId=await ctx.loader.create({name:'cordis:include',config:{path:pathToFileURL(configPath).href}})
+   const fork=ctx.loader.resolve(includeId).fiber
+   await fork.await();await ctx.loader.await()
+   const entry=id=>[...ctx.loader.entries()].find(row=>row.options.id===id)
+   const toggle=async(id,enabled)=>{
+    const target=entry(id),previous=target.fiber
+    await target.update({disabled:!enabled})
+    if(!enabled)await previous?.await()
+    else await target.fiber?.await()
+   }
+   assert.equal(entry('ths-holdings').options.config.pollMs,3456)
+   assert.equal(entry('ths-holdings').options.config.showCard,false)
+   if(boot===1)assert.equal(entry('ths-holdings').disabled,true,'Card disabled state survives a cold boot')
    const until=Date.now()+3000
    while(!(await ctx.skills.get('ths-portfolio-report'))&&Date.now()<until)await new Promise(r=>setTimeout(r,10))
    const skill=await ctx.skills.get('ths-portfolio-report')
@@ -58,10 +82,26 @@ try {
    assert.equal(value.status,'ok');assert.equal(value.data.position_count,1)
    assert.equal(value.data.positions[0].name,'合成证券全名')
    assert(!JSON.stringify(result).includes('PRIVATE-ACCOUNT'))
-   await fork.dispose()
+   const routes=ctx.get('webServer').routes
+   await toggle('ths-holdings-skill',false)
+   assert.equal(await ctx.skills.get('ths-portfolio-report'),undefined)
+   if(boot===0)assert(routes.has('/api/stock-pnl'),'Card-only mode retains routes')
+   await toggle('ths-holdings',false)
+   assert.equal(routes.size,0,'Last feature releases routes and client carrier')
+   assert.equal(ctx.get('thsHoldings'),undefined)
+   await toggle('ths-holdings-skill',true)
+   assert.equal(ctx.get('thsHoldings').state().card,false)
+   const again=await ctx.tools.execute({callId:'skill-only',name:'ths_get_positions',arguments:{},signal:new AbortController().signal})
+   assert.equal(JSON.parse(again.content[0].text).status,'ok','Skill-only mode retains custom credential references from disabled card config')
+   await toggle('ths-holdings',true)
+   assert.equal(ctx.get('thsHoldings').state().card,true)
+   assert.equal(ctx.tools.schemas().filter(tool=>tool.name.startsWith('ths_')).length,3)
+   await toggle('ths-holdings',false)
+   await writeFile(configPath,stringify(rows.map(row=>({...row,...row.id==='ths-holdings'?{config:cardConfig,disabled:true}:{} }))))
+   fork.dispose();await fork.await()
    assert.equal(await ctx.skills.get('ths-portfolio-report'),undefined)
    assert(!ctx.tools.schemas().some(x=>x.name.startsWith('ths_')))
-   evidence.push({boot,automaticSkill:true,toolQuery:true,unrelatedCwd:true,unregisteredOnUnload:true,skillPath:path})
+   evidence.push({boot,automaticSkill:true,toolQuery:true,unrelatedCwd:true,unregisteredOnUnload:true,independentComponents:true,customCredentials:true,coldSettings:true,skillPath:path})
   } finally {await ctx.fiber.dispose()}
  }
 } finally {globalThis.fetch=originalFetch;process.chdir(originalCwd)}
