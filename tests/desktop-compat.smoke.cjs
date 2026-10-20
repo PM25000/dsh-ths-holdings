@@ -173,8 +173,9 @@ globalThis.fetch = (input, init) => {
     assert.equal(positionResult.status,'ok',JSON.stringify(positionResult));
     assert.equal(positionResult.data.positions[0].name,'示例完整名称');
     const bundle = await json('/api/ths-compat/bundle');
+    assert.equal(bundle.meta.title.zh, '同花顺持仓插件', 'Plugin list and details use the bundle display name');
     assert.equal(bundle.rows.length, 2, 'Only the two feature rows have switches');
-    assert.deepEqual(bundle.rows.map(row=>row.meta.title.zh).sort(), ['持仓报告 Skill', '盈亏卡片'].sort());
+    assert.deepEqual(bundle.rows.map(row=>row.meta.title.zh).sort(), ['持仓报告 Skill', '同花顺持仓插件'].sort());
     const onlySkill = await json('/api/ths-compat/components/card/off');
     assert.deepEqual({ card: onlySkill.state.card, skill: onlySkill.state.skill }, { card: false, skill: true });
     assert.equal((await json('/api/stock-pnl/selection')).fund_key, 'compat-two');
