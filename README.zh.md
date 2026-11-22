@@ -144,6 +144,10 @@ dsh plugin --profile web add dsh-ths-holdings
 - 持仓报告目前支持人民币沪深股票及 ETF 普通账本，暂不支持融资融券、空头、B 股及其他市场。
 - 登录信息只填写在插件设置中，不要放进聊天或定时任务提示。
 
+## Star History
+
+[![Star History Chart for PM25000/dsh-ths-holdings](https://api.star-history.com/svg?repos=PM25000/dsh-ths-holdings&type=Date)](https://www.star-history.com/?repos=PM25000%2Fdsh-ths-holdings&type=date)
+
 ## License
 
 [MIT](LICENSE)

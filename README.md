@@ -143,6 +143,10 @@ Have the assistant confirm the portfolio name and next run time. Scheduled repor
 - Reports currently support ordinary CNY portfolios holding Shanghai/Shenzhen stocks and ETFs. Margin accounts, short positions, B shares and other markets are outside the supported scope.
 - Enter login information only in plugin settings, not in chat or scheduled prompts.
 
+## Star History
+
+[![Star History Chart for PM25000/dsh-ths-holdings](https://api.star-history.com/svg?repos=PM25000/dsh-ths-holdings&type=Date)](https://www.star-history.com/?repos=PM25000%2Fdsh-ths-holdings&type=date)
+
 ## License
 
 [MIT](LICENSE)
